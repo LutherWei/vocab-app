@@ -162,6 +162,13 @@ function detectByScript(t){
   if(/[\u0600-\u06FF]/.test(t)) return "阿拉伯文";
   return null;
 }
+const looksEnglish = t => /^[A-Za-z][A-Za-z' .-]*$/.test(t);
+// 舊資料補標籤：純英文字母且沒填語言的單字，補上「英文」
+{
+  let migrated = false;
+  state.words.forEach(w => { if(!w.lang && looksEnglish(w.term)){ w.lang = "英文"; migrated = true; } });
+  if(migrated) save();
+}
 async function gemini(prompt){
   if(!state.geminiKey) return null;
   const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + encodeURIComponent(state.geminiKey);
@@ -289,16 +296,20 @@ window.onTermBlur = async () => { // 有歧義的交給 AI（需 Gemini 金鑰�
   const term=$("f-term")?.value.trim(), langEl=$("f-lang"), msg=$("f-msg");
   if(!term||!langEl||langEl.value.trim()) return;
   if(detectByScript(term)){ langEl.value=detectByScript(term); return; }
-  if(!state.geminiKey){ if(msg) msg.textContent="提示：到「設定」填入 Gemini 金鑰，就能 AI 自動判斷這類單字的語言"; return; }
+  if(!state.geminiKey){
+    if(looksEnglish(term)){ langEl.value="英文"; return; }
+    if(msg) msg.textContent="提示：到「設定」填入 Gemini 金鑰，就能 AI 自動判斷這類單字的語言";
+    return;
+  }
   if(msg) msg.textContent="AI 判斷語言中⋯";
-  const l = await detectLangAI(term);
+  const l = await detectLangAI(term) || (looksEnglish(term)?"英文":null);
   if(l && langEl && !langEl.value.trim()) langEl.value=l;
   if(msg) msg.textContent = l?"":"AI 判斷失敗，請手動填語言或稍後再試";
 };
 window.addWord = () => {
   const term=$("f-term").value.trim(), meaning=$("f-meaning").value.trim();
   if(!term||!meaning){ $("f-msg").textContent="單字和意思都要填喔"; return; }
-  state.words.unshift({ id:uid(), term, meaning, lang:$("f-lang").value.trim(), note:$("f-note").value.trim(),
+  state.words.unshift({ id:uid(), term, meaning, lang:$("f-lang").value.trim()||detectByScript(term)||(looksEnglish(term)?"英文":""), note:$("f-note").value.trim(),
     mastery:0, reviews:0, sentences:[], createdAt:Date.now(), lastReviewed:null });
   save(); listUI.showForm=false; render();
 };
