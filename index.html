@@ -176,7 +176,7 @@ let aiErr = "";
 async function gemini(prompt, base64Data = null, mimeType = null){
   if(!state.geminiKey) return null;
   // 為了確保多模態視覺功能穩定，使用 1.5-flash
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + encodeURIComponent(state.geminiKey);
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + encodeURIComponent(state.geminiKey);
   
   const parts = [{ text: prompt }];
   if (base64Data && mimeType) {
