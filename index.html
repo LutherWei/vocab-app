@@ -185,14 +185,15 @@ async function gemini(prompt){
 async function detectLangAI(term){
   try{
     const t = await gemini(`判斷「${term}」這個單字最可能是哪一種語言。只回覆語言名稱的繁體中文，例如：英文、日文、韓文、中文、法文、德文、西班牙文、越南文。不要任何其他文字或標點。`);
-    return (t && t.length<=6) ? t : null;
+    // 放寬字數限制到 10，並自動清除結尾的換行或句點
+    const cleanT = (t || "").replace(/[\n。]/g, "").trim();
+    return (cleanT && cleanT.length <= 10) ? cleanT : null;
   }catch(e){ return null; }
 }
 async function translateAI(term, lang){
   try{
     const t = await gemini(`請把${lang?lang+"的":""}單字「${term}」翻譯成繁體中文，作為單字本「意思」欄位的內容。回覆要簡短不要超過40個字元（例如：蘋果、跑步；奔跑），多個意思用「；」分隔。只回覆意思本身，不要拼音、例句或任何其他文字。`);
-    return t;
-    (t && t.length<=40) ? t : null;
+    return (t && t.length<=40) ? t : null;
   }catch(e){ return null; }
 }
 
@@ -308,6 +309,9 @@ window.onTermInput = v => { // 字形明確的語言即時判斷
     if(l) langEl.value=l;
   }
 };
+window.isDetectingLang = false; // 防撞車標記
+
+// 1. 自動偵測語言（打完字點擊背景時觸發）
 window.onTermBlur = async () => { 
   const term=$("f-term")?.value.trim(), langEl=$("f-lang"), msg=$("f-msg");
   if(!term) return;
@@ -316,17 +320,22 @@ window.onTermBlur = async () => {
     const byScript = detectByScript(term);
     if(byScript) {
       langEl.value = byScript;
-    } else if(state.geminiKey){
-      if(msg) msg.textContent="AI 判斷語言中⋯";
+    } else if(state.geminiKey && !window.isDetectingLang){
+      window.isDetectingLang = true; // 上鎖，防止翻譯按鈕同時發送請求
+      if(msg && !msg.textContent) msg.textContent="AI 判斷語言中⋯";
+      
       const l = await detectLangAI(term) || (looksEnglish(term)?"英文":null);
+      
       if(l && !langEl.value.trim()) langEl.value=l;
-      if(msg) msg.textContent=""; // 語言填完就清空提示
+      if(msg && msg.textContent==="AI 判斷語言中⋯") msg.textContent=""; 
+      window.isDetectingLang = false; // 解鎖
     } else if(looksEnglish(term)){
       langEl.value = "英文";
     }
   }
 };
 
+// 2. 翻譯按鈕功能
 window.triggerAITranslate = async () => {
   const term = $("f-term")?.value.trim();
   const langEl = $("f-lang");
@@ -342,7 +351,14 @@ window.triggerAITranslate = async () => {
     return;
   }
 
-  if (msg) msg.textContent = "✨ AI 翻譯中⋯";
+  if (msg) msg.textContent = "✨ AI 處理中⋯";
+
+  // 如果使用者打完字「立刻」按翻譯，語言可能還來不及填，這裡順手幫忙補上
+  if (langEl && !langEl.value.trim()) {
+     const l = detectByScript(term) || await detectLangAI(term) || (looksEnglish(term)?"英文":"");
+     if (l) langEl.value = l;
+  }
+
   const t = await translateAI(term, langEl ? langEl.value.trim() : "");
   
   if (t) {
