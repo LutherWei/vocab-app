@@ -495,7 +495,7 @@ function renderReview(){
   if(rev.idx>=rev.ids.length){
     $("main").innerHTML = `<div class="card center"><div style="font-size:32px">🎉</div><b>本回合完成！</b>
       <p class="hint">不熟 ${rev.results.hard} · 普通 ${rev.results.ok} · 記得 ${rev.results.easy}</p></div>
-      <button class="primary" onclick="startRev('auto')">再來一回合</button>`;
+      <button class="primary" onclick="rev=null; render()">回到複習設定</button>`;
     return;
   }
   const w = state.words.find(x=>x.id===rev.ids[rev.idx]);
@@ -508,7 +508,11 @@ function renderReview(){
     card = `<div style="font-size:24px;font-weight:600;color:var(--ink-soft)">${esc(w.meaning)}</div>
       ${w.note?`<div class="hint">📝 ${esc(w.note)}</div>`:""}<div style="margin-top:12px">${dots(w.mastery||0)}</div>`;
   }
-  $("main").innerHTML = `<div class="center small" style="margin-bottom:12px">第 ${rev.idx+1} / ${rev.ids.length} 張</div>
+  $("main").innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span class="small">第 ${rev.idx+1} / ${rev.ids.length} 張</span>
+      <button class="ghost" style="padding:7px 12px;font-size:14px" onclick="rev.idx=rev.ids.length; render()">提前結束</button>
+    </div>
     <div class="bigcard" onclick="rev.flipped=!rev.flipped;render()">${card}</div>
     ${rev.flipped?`<div class="grid3" style="margin-top:14px">
       <button class="b-hard" onclick="revAns('hard')">不熟 😵</button>
