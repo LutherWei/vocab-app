@@ -451,7 +451,11 @@ window.toggleRevSel = id => {
   const idx = revUI.sel.indexOf(id);
   if(idx > -1) revUI.sel.splice(idx, 1);
   else revUI.sel.push(id);
-  render();
+  const btn = $("btn-rev-start");
+  if(btn) {
+    btn.textContent = `開始複習（${revUI.sel.length} 張）`;
+    btn.disabled = revUI.sel.length === 0;
+  }
 };
 
 function renderReview(){
@@ -473,7 +477,7 @@ function renderReview(){
           </label>
         `).join("")}
       </div>
-      <button class="primary" onclick="startRev('manual')" ${revUI.sel.length===0?'disabled':''}>開始複習（${revUI.sel.length} 張）</button>
+      <button id="btn-rev-start" class="primary" onclick="startRev('manual')" ${revUI.sel.length===0?'disabled':''}>開始複習（${revUI.sel.length} 張）</button>
       <button class="ghost" style="width:100%; margin-top:8px;" onclick="revUI.manual=false; render()">取消</button>
     </div>`;
     return;
@@ -544,7 +548,12 @@ window.toggleQuizSel = id => {
   const idx = quizUI.sel.indexOf(id);
   if(idx > -1) quizUI.sel.splice(idx, 1);
   else quizUI.sel.push(id);
-  render();
+  const btn = $("btn-quiz-start");
+  if(btn) {
+    const needs = QUIZ_TYPES[quizCfg.type].needs;
+    btn.textContent = `開始測驗（${quizUI.sel.length} 題）`;
+    btn.disabled = quizUI.sel.length < needs;
+  }
 };
 
 const langOf = w => w.lang || "未分類";
@@ -586,7 +595,7 @@ function renderQuizSetup(){
              </label>
            `).join("")}
          </div>
-         <button class="primary" onclick="startQuiz('manual')" ${quizUI.sel.length<needs?'disabled':''}>開始測驗（${quizUI.sel.length} 題）</button>
+         <button id="btn-quiz-start" class="primary" onclick="startQuiz('manual')" ${quizUI.sel.length<needs?'disabled':''}>開始測驗（${quizUI.sel.length} 題）</button>
          <button class="ghost" style="width:100%; margin-top:8px;" onclick="quizUI.manual=false; render()">取消</button>
        </div>`;
      return;
@@ -771,7 +780,10 @@ let sen = { id:null, ai:null, loading:false, error:false };
 let senUI = { manual: false, sel: null };
 window.toggleSenSel = id => {
   senUI.sel = id;
-  render();
+  const btn = $("btn-sen-start");
+  if(btn) {
+    btn.disabled = false;
+  }
 };
 
 function renderSentence(){
@@ -787,9 +799,9 @@ function renderSentence(){
             ${dots(w.mastery||0)}
           </label>
         `).join("")}
-      </div>
-      <button class="primary" onclick="pickSenWord(true, 'manual')" ${!senUI.sel?'disabled':''}>開始造句</button>
-      <button class="ghost" style="width:100%; margin-top:8px;" onclick="senUI.manual=false; render()">取消</button>
+        </div>
+        <button id="btn-sen-start" class="primary" onclick="pickSenWord(true, 'manual')" ${!senUI.sel?'disabled':''}>開始造句</button>
+        <button class="ghost" style="width:100%; margin-top:8px;" onclick="senUI.manual=false; render()">取消</button>
     </div>`;
     return;
   }
