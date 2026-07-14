@@ -521,8 +521,35 @@ function renderQuiz(){
 function renderQuizSetup(){
   const groups=langGroups(), langs=Object.keys(groups);
   if(!quizCfg.lang || !groups[quizCfg.lang]) quizCfg.lang=langs[0];
-  const pool=groups[quizCfg.lang], needs=QUIZ_TYPES[quizCfg.type].needs;
+  const pool=groups[quizCfg.lang]||[];
+  const needs=QUIZ_TYPES[quizCfg.type].needs;
   const log=[...(state.quizLog||[])].slice(-5).reverse();
+
+  // 畫面 1：手動挑選測驗範圍
+  if(quizUI.manual) {
+     $("main").innerHTML = `
+       <div class="card"><b>手動挑選測驗單字</b>
+         <div class="hint" style="margin-bottom:8px;">考區：${esc(quizCfg.lang)}（需至少選 ${needs} 個字）</div>
+         <div style="display:flex; justify-content:space-between; margin:10px 0;">
+           <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="quizUI.sel=langGroups()['${esc(quizCfg.lang)}'].map(w=>w.id); render()">全選</button>
+           <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="quizUI.sel=[]; render()">全不選</button>
+         </div>
+         <div style="max-height: 40vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; margin-bottom:12px; background:var(--paper);">
+           ${pool.map(w=>`
+             <label style="display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom: 1px solid #e2e8f0; background:var(--card); margin:0;">
+               <input type="checkbox" ${quizUI.sel.includes(w.id)?'checked':''} onchange="toggleQuizSel('${w.id}')" style="width:20px;height:20px;margin:0;flex-shrink:0;">
+               <div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.term)}</div><div class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.meaning)}</div></div>
+               ${dots(w.mastery||0)}
+             </label>
+           `).join("")}
+         </div>
+         <button class="primary" onclick="startQuiz('manual')" ${quizUI.sel.length<needs?'disabled':''}>開始測驗（${quizUI.sel.length} 題）</button>
+         <button class="ghost" style="width:100%; margin-top:8px;" onclick="quizUI.manual=false; render()">取消</button>
+       </div>`;
+     return;
+  }
+
+  // 畫面 2：一般的測驗設定
   $("main").innerHTML = `
     <div class="card">
       <b>測驗設定</b>
@@ -534,25 +561,57 @@ function renderQuizSetup(){
         return `<button class="opt ${quizCfg.type===k?"sel":""} ${dis?"dim":""}" ${dis?"disabled":""} onclick="quizCfg.type='${k}';render()">${v.name}${dis?`（需至少 ${v.needs} 個字）`:""}</button>`;
       }).join("")}
       <div class="small" style="margin:4px 0 6px">題數（這個語言共 ${pool.length} 個字）</div>
-      <div class="filter">
+      <div class="filter" id="countbtns">
         ${[5,10,20].map(n=>`<button class="${quizCfg.count===n?"on":""}" ${pool.length<n?"disabled":""} onclick="quizCfg.count=${n};render()">${n} 題</button>`).join("")}
         <button class="${quizCfg.count==="all"?"on":""}" onclick="quizCfg.count='all';render()">全部（${pool.length}）</button>
+        <input id="q-count" type="number" inputmode="numeric" min="1" max="${pool.length}" placeholder="自訂"
+          value="${typeof quizCfg.count==="number"&&![5,10,20].includes(quizCfg.count)?quizCfg.count:""}"
+          oninput="setCustomCount(this.value,${pool.length})" onblur="render()">
       </div>
     </div>
-    <button class="primary" ${pool.length<needs?"disabled":""} onclick="startQuiz()">開始測驗</button>
-    ${log.length?`<div class="card" style="margin-top:12px"><b>測驗紀錄</b>${log.map(r=>`
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px">
+    <div class="row">
+      <button class="primary" style="flex:2" ${pool.length<needs?"disabled":""} onclick="startQuiz('auto')">隨機測驗</button>
+      <button class="ghost" style="flex:1" ${pool.length<needs?"disabled":""} onclick="quizUI.manual=true; quizUI.sel=[]; render()">手動挑選</button>
+    </div>
+    
+    ${log.length?`<div class="card" style="margin-top:12px"><b>測驗紀錄</b><div class="small" style="margin-top:4px">點一筆可展開逐題結果</div>${log.map(r=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;cursor:pointer" onclick="logUI.expanded=logUI.expanded===${r.at}?null:${r.at};render()">
         <span class="small">${new Date(r.at).toLocaleString("zh-TW",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>
         <span style="flex:1;display:flex;gap:6px;align-items:center">${chip(r.lang)}<span class="small">${QUIZ_TYPES[r.type]?QUIZ_TYPES[r.type].name:esc(r.type)}</span></span>
-        <b style="color:${r.right/r.total>=0.8?"var(--ok)":"var(--ink-soft)"}">${r.right}/${r.total}</b>
-      </div>`).join("")}</div>`:""}`;
+        <b style="color:${r.right/r.total>=0.8?"var(--ok)":"var(--ink-soft)"}">${r.right}/${r.total} ${logUI.expanded===r.at?"▾":"▸"}</b>
+      </div>
+      ${logUI.expanded===r.at?`<div style="margin-top:6px">${
+        (r.detail||[]).length ? r.detail.map(d=>`
+          <div class="sent" style="${d.ok?"":"border-left:3px solid var(--bad);"}">
+            ${d.ok?"✓":"✗"} <b>${esc(d.term)}</b><span class="small"> — ${esc(d.meaning)}</span>
+            ${d.ok?"":`<div class="small" style="color:var(--bad);margin-top:2px">你的答案：${d.given?esc(d.given):"（未作答）"}</div>`}
+          </div>`).join("")
+        : `<div class="small" style="padding:4px 2px">這是舊版紀錄，沒有逐題內容</div>`
+      }</div>`:""}`).join("")}</div>`:""}`;
 }
 
-window.startQuiz = () => {
+window.setCustomCount = (v,max) => { 
+  const n = parseInt(v,10);
+  if(isNaN(n) || n<1) return;
+  quizCfg.count = Math.min(n,max);
+  const box = $("countbtns");
+  if(box) [...(box.children||[])].forEach(b=>b.classList&&b.classList.remove("on"));
+};
+
+window.startQuiz = (mode) => {
   const pool=langGroups()[quizCfg.lang]||[];
   if(pool.length<QUIZ_TYPES[quizCfg.type].needs) return;
-  const n = quizCfg.count==="all"?pool.length:Math.min(quizCfg.count,pool.length);
-  quiz = { cfg:{...quizCfg}, qs:weightedSample(pool,n).map(w=>w.id), idx:0, right:0, answered:0,
+  
+  let qs;
+  if(mode === 'manual'){
+    qs = shuffle(quizUI.sel);
+    quizUI.manual = false;
+  } else {
+    const n = quizCfg.count==="all"?pool.length:Math.min(quizCfg.count,pool.length);
+    qs = weightedSample(pool,n).map(w=>w.id);
+  }
+  
+  quiz = { cfg:{...quizCfg}, qs, idx:0, right:0, answered:0,
     chosen:null, opts:null, typed:null, finished:false, saved:false, detail:[] };
   render();
 };
