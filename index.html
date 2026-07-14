@@ -190,8 +190,9 @@ async function detectLangAI(term){
 }
 async function translateAI(term, lang){
   try{
-    const t = await gemini(`請把${lang?lang+"的":""}單字「${term}」翻譯成繁體中文，作為單字本「意思」欄位的內容。回覆要簡短（例如：蘋果、跑步；奔跑），多個意思用「；」分隔。只回覆意思本身，不要拼音、例句或任何其他文字。`);
-    return (t && t.length<=40) ? t : null;
+    const t = await gemini(`請把${lang?lang+"的":""}單字「${term}」翻譯成繁體中文，作為單字本「意思」欄位的內容。回覆要簡短不要超過40個字元（例如：蘋果、跑步；奔跑），多個意思用「；」分隔。只回覆意思本身，不要拼音、例句或任何其他文字。`);
+    return t;
+    (t && t.length<=40) ? t : null;
   }catch(e){ return null; }
 }
 
