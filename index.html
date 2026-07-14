@@ -120,7 +120,7 @@
   <div class="stats" id="stats"></div>
 </header>
 <main id="main">
-  <noscript><div class="empty">這個頁面需要 JavaScript 才能運作。</div></noscript>
+  <noscript><div class="empty">這個頁面需要 JavaScript 才能運作。<br>如果你是在 iPhone「檔案」App 裡預覽看到這段文字，<br>請改用瀏覽器開啟網址版本。</div></noscript>
 </main>
 <nav id="nav"></nav>
 
@@ -166,23 +166,21 @@ function detectByScript(t){
   return null;
 }
 const looksEnglish = t => /^[A-Za-z][A-Za-z' .-]*$/.test(t);
+// 舊資料補標籤
 {
   let migrated = false;
   state.words.forEach(w => { if(!w.lang && looksEnglish(w.term)){ w.lang = "英文"; migrated = true; } });
   if(migrated) save();
 }
 
-let aiErr = ""; 
+let aiErr = "";
 async function gemini(prompt, base64Data = null, mimeType = null){
   if(!state.geminiKey) return null;
-  // 為了確保多模態視覺功能穩定，使用 1.5-flash
   const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + encodeURIComponent(state.geminiKey);
-  
   const parts = [{ text: prompt }];
   if (base64Data && mimeType) {
     parts.push({ inlineData: { mimeType: mimeType, data: base64Data } });
   }
-
   const res = await fetch(url,{
     method:"POST", headers:{"Content-Type":"application/json"},
     body:JSON.stringify({contents:[{parts: parts}]})
@@ -316,7 +314,7 @@ function renderList(){
   $("main").innerHTML = h;
 }
 
-function renderListOnly(){ 
+function renderListOnly(){
   const el=$("wordlist"); if(!el) { render(); return; }
   const u=listUI, q=u.query.trim().toLowerCase();
   const filtered = state.words
@@ -344,7 +342,7 @@ function wordCard(w){
     </div>${body}</div>`;
 }
 
-window.onTermInput = v => { 
+window.onTermInput = v => {
   const langEl=$("f-lang");
   if(langEl && !langEl.value.trim()){
     const l=detectByScript(v.trim());
@@ -378,95 +376,53 @@ window.triggerAITranslate = async () => {
   const t = await translateAI(term, langEl ? langEl.value.trim() : "");
   if (t) { if (meanEl) meanEl.value = t; if (msg) msg.textContent = "✓ 已自動填入 AI 翻譯"; } else { if (msg) msg.textContent = "AI 翻譯失敗，請手動輸入" + (aiErr?`（${aiErr}）`:""); }
 };
-// 1. 手動新增單字（自動轉小寫＋防重複）
+
+// 手動新增單字（自動轉小寫＋防重複）
 window.addWord = () => {
   let term = $("f-term").value.trim();
   const meaning = $("f-meaning").value.trim();
-  
-  if(!term || !meaning){ 
-    $("f-msg").textContent = "單字和意思都要填喔"; 
-    return; 
-  }
-  
-  // 轉成全小寫
+  if(!term || !meaning){ $("f-msg").textContent = "單字和意思都要填喔"; return; }
   term = term.toLowerCase();
-
-  // 檢查有沒有重複的單字
   const isDuplicate = state.words.some(w => w.term.toLowerCase() === term);
-  if (isDuplicate) {
-    $("f-msg").textContent = "⚠️ 這個單字已經在單字本裡面囉！";
-    return;
-  }
-
-  // 通過檢查，存入單字本
-  state.words.unshift({ 
-    id: uid(), 
-    term: term, 
-    meaning: meaning, 
-    lang: $("f-lang").value.trim() || detectByScript(term) || (looksEnglish(term) ? "英文" : ""), 
+  if (isDuplicate) { $("f-msg").textContent = "⚠️ 這個單字已經在單字本裡面囉！"; return; }
+  state.words.unshift({
+    id: uid(), term: term, meaning: meaning,
+    lang: $("f-lang").value.trim() || detectByScript(term) || (looksEnglish(term) ? "英文" : ""),
     note: $("f-note").value.trim(),
-    mastery: 0, 
-    reviews: 0, 
-    sentences: [], 
-    createdAt: Date.now(), 
-    lastReviewed: null 
+    mastery: 0, reviews: 0, sentences: [], createdAt: Date.now(), lastReviewed: null
   });
-  
-  save(); 
-  listUI.showForm = false; 
-  render();
+  save(); listUI.showForm = false; render();
 };
 
-// 2. AI 圖片/PDF 匯入單字（自動轉小寫＋防重複）
+// AI 圖片/PDF 匯入單字
 window.extractWordsAI = async () => {
   const fileInp = $("f-file");
   const promptInp = $("f-prompt");
   const msg = $("f-msg-upload");
-
   if (!fileInp || !fileInp.files[0]) { msg.textContent = "請先選擇要上傳的檔案！"; return; }
   if (!state.geminiKey) { msg.textContent = "請先到「設定」填入 Gemini 金鑰！"; return; }
-
   const file = fileInp.files[0];
   if (file.size > 4 * 1024 * 1024) { msg.textContent = "檔案太大 (請小於 4MB)！"; return; }
-
   msg.textContent = "🖼️ 讀取檔案中，請稍候⋯";
-  
   try {
     const base64Full = await getBase64(file);
     const base64Data = base64Full.split(',')[1];
-    const mimeType = file.type; 
-
+    const mimeType = file.type;
     const customRule = promptInp.value.trim();
-    const basePrompt = `請從附檔中擷取單字。
-使用者自訂擷取規則：${customRule ? customRule : "請抓出畫面中明顯是重點的單字"}。
-請回覆「純 JSON 陣列」，每個物件必須包含三個屬性：
-"term" (單字原文), "meaning" (繁體中文翻譯), "lang" (語言名稱，如英文、日文、韓文等)。
-範例：[{"term":"apple", "meaning":"蘋果", "lang":"英文"}]
-注意：不要包含 Markdown 語法，只要回傳 JSON 陣列本身。`;
-
+    const basePrompt = `請從附檔中擷取單字。\n使用者自訂擷取規則：${customRule ? customRule : "請抓出畫面中明顯是重點的單字"}。\n請回覆「純 JSON 陣列」，每個物件必須包含三個屬性：\n"term" (單字原文), "meaning" (繁體中文翻譯), "lang" (語言名稱，如英文、日文、韓文等)。\n範例：[{"term":"apple", "meaning":"蘋果", "lang":"英文"}]\n注意：不要包含 Markdown 語法，只要回傳 JSON 陣列本身。`;
     msg.textContent = "✨ AI 視覺特徵解析與單字萃取中⋯";
-    
     const textResRaw = await gemini(basePrompt, base64Data, mimeType);
     if (!textResRaw) throw new Error("AI 回傳空白");
-    
     const textRes = textResRaw.replace(/```json|```/g,"").trim();
     const words = JSON.parse(textRes);
-    
     if (!Array.isArray(words) || words.length === 0) throw new Error("找不到符合規則的單字");
-
-    let added = 0;
-    let skipped = 0; // 紀錄跳過幾個重複單字
-    
+    let added = 0, skipped = 0;
     words.forEach(w => {
        if (w.term && w.meaning) {
-          const term = w.term.trim().toLowerCase(); // 統一轉小寫
-          
-          // 檢查重複
+          const term = w.term.trim().toLowerCase();
           const isDuplicate = state.words.some(existing => existing.term.toLowerCase() === term);
-          
-          if (isDuplicate) {
-             skipped++;
-          } else {
+          if (isDuplicate) { skipped++; }
+          else {
              state.words.unshift({
                 id: uid(), term: term, meaning: w.meaning.trim(), lang: w.lang || "未分類",
                 note: "AI 圖片/PDF 匯入", mastery: 0, reviews: 0, sentences: [],
@@ -476,83 +432,53 @@ window.extractWordsAI = async () => {
           }
        }
     });
-
-    save();
-    listUI.showUploadForm = false;
-    render();
+    save(); listUI.showUploadForm = false; render();
     alert(`🎉 成功解析並匯入 ${added} 個單字！${skipped > 0 ? `\n（有 ${skipped} 個重複單字已自動略過）` : ""}`);
-
   } catch (e) {
      msg.textContent = "擷取失敗：" + e.message;
   }
 };
+
 window.delWord = id => {
   if(!confirm("確定要刪除這個單字？")) return;
-  state.words = state.words.filter(w=>w.id!==id); save(); renderStats(); renderListOnly(); 
+  state.words = state.words.filter(w=>w.id!==id); save(); renderStats(); renderListOnly();
 };
 
 // ============ 複習（單字卡） ============
 let rev = null;
-let revUI = { manual: false, sel: [] };
-
-window.toggleRevSel = id => {
-  const idx = revUI.sel.indexOf(id);
-  if(idx > -1) revUI.sel.splice(idx, 1);
-  else revUI.sel.push(id);
-  const btn = document.getElementById("rev-btn");
-  if(btn) { btn.textContent = `開始複習（${revUI.sel.length} 張）`; btn.disabled = revUI.sel.length === 0; }
-};
-window.setRevSelAll = (isAll) => {
-  if(isAll) revUI.sel = state.words.map(w=>w.id); else revUI.sel = [];
-  document.querySelectorAll('.rev-cb').forEach(cb => cb.checked = isAll);
-  const btn = document.getElementById("rev-btn");
-  if(btn) { btn.textContent = `開始複習（${revUI.sel.length} 張）`; btn.disabled = revUI.sel.length === 0; }
-};
-
 function renderReview(){
   const ws=state.words;
   if(!ws.length){ $("main").innerHTML=`<div class="empty">先到「單字庫」新增幾個單字，就能開始複習囉。</div>`; return; }
-  if(!rev && revUI.manual){
-    $("main").innerHTML = `<div class="card"><b>手動挑選複習單字</b>
-      <div style="display:flex; justify-content:space-between; margin:10px 0;">
-        <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="setRevSelAll(true)">全選</button>
-        <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="setRevSelAll(false)">全不選</button>
-      </div>
-      <div style="max-height: 45vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; margin-bottom:12px; background:var(--paper);">
-        ${ws.map(w=>`
-          <label style="display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom: 1px solid #e2e8f0; background:var(--card); margin:0;">
-            <input type="checkbox" class="rev-cb" ${revUI.sel.includes(w.id)?'checked':''} onchange="toggleRevSel('${w.id}')" style="width:20px;height:20px;margin:0;flex-shrink:0;">
-            <div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.term)}</div><div class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.meaning)}</div></div>
-            ${dots(w.mastery||0)}
-          </label>
-        `).join("")}
-      </div>
-      <button id="rev-btn" class="primary" onclick="startRev('manual')" ${revUI.sel.length===0?'disabled':''}>開始複習（${revUI.sel.length} 張）</button>
-      <button class="ghost" style="width:100%; margin-top:8px;" onclick="revUI.manual=false; render()">取消</button>
-    </div>`;
-    return;
-  }
   if(!rev){
-    $("main").innerHTML = `<div class="card"><b>單字卡複習</b><p class="hint">每回合最多 ${SESSION_SIZE} 張卡。</p></div>
-      <div class="row"><button class="primary" style="flex:2" onclick="startRev('auto')">隨機抽卡（${Math.min(SESSION_SIZE,ws.length)} 張）</button><button class="ghost" style="flex:1" onclick="revUI.manual=true; revUI.sel=[]; render()">手動挑選</button></div>`;
+    $("main").innerHTML = `<div class="card"><b>單字卡複習</b>
+      <p class="hint">每回合最多 ${SESSION_SIZE} 張卡。<b>不熟的單字會更常出現</b>，已經熟練的會慢慢退場。看到單字先想意思，再點卡片翻面對答案。</p></div>
+      <button class="primary" onclick="startRev()">開始複習（${Math.min(SESSION_SIZE,ws.length)} 張）</button>`;
     return;
   }
   if(rev.idx>=rev.ids.length){
-    $("main").innerHTML = `<div class="card center"><div style="font-size:32px">🎉</div><b>本回合完成！</b><p class="hint">不熟 ${rev.results.hard} · 普通 ${rev.results.ok} · 記得 ${rev.results.easy}</p></div>
-      <button class="primary" onclick="startRev('auto')">再來一回合</button><button class="ghost" style="width:100%; margin-top:8px" onclick="revUI.manual=true; rev=null; render()">手動挑選單字</button>`;
+    $("main").innerHTML = `<div class="card center"><div style="font-size:32px">🎉</div><b>本回合完成！</b>
+      <p class="hint">不熟 ${rev.results.hard} · 普通 ${rev.results.ok} · 記得 ${rev.results.easy}</p></div>
+      <button class="primary" onclick="startRev()">再來一回合</button>`;
     return;
   }
   const w = state.words.find(x=>x.id===rev.ids[rev.idx]);
   if(!w){ rev.idx++; renderReview(); return; }
-  let card = !rev.flipped ? `<div style="font-size:34px;font-weight:700"><span class="term-hl">${esc(w.term)}</span></div><div style="margin-top:10px">${chip(w.lang)}</div><div class="small" style="margin-top:16px">點一下翻面</div>` : `<div style="font-size:24px;font-weight:600;color:var(--ink-soft)">${esc(w.meaning)}</div>${w.note?`<div class="hint">📝 ${esc(w.note)}</div>`:""}<div style="margin-top:12px">${dots(w.mastery||0)}</div>`;
-  $("main").innerHTML = `<div class="center small" style="margin-bottom:12px">第 ${rev.idx+1} / ${rev.ids.length} 張</div><div class="bigcard" onclick="rev.flipped=!rev.flipped;render()">${card}</div>${rev.flipped?`<div class="grid3" style="margin-top:14px"><button class="b-hard" onclick="revAns('hard')">不熟 😵</button><button class="b-ok" onclick="revAns('ok')">普通 🤔</button><button class="b-easy" onclick="revAns('easy')">記得 😎</button></div>`:""}`;
+  let card;
+  if(!rev.flipped){
+    card = `<div style="font-size:34px;font-weight:700"><span class="term-hl">${esc(w.term)}</span></div>
+      <div style="margin-top:10px">${chip(w.lang)}</div><div class="small" style="margin-top:16px">點一下翻面看答案</div>`;
+  } else {
+    card = `<div style="font-size:24px;font-weight:600;color:var(--ink-soft)">${esc(w.meaning)}</div>
+      ${w.note?`<div class="hint">📝 ${esc(w.note)}</div>`:""}<div style="margin-top:12px">${dots(w.mastery||0)}</div>`;
+  }
+  $("main").innerHTML = `<div class="center small" style="margin-bottom:12px">第 ${rev.idx+1} / ${rev.ids.length} 張</div>
+    <div class="bigcard" onclick="rev.flipped=!rev.flipped;render()">${card}</div>
+    ${rev.flipped?`<div class="grid3" style="margin-top:14px">
+      <button class="b-hard" onclick="revAns('hard')">不熟 😵</button>
+      <button class="b-ok" onclick="revAns('ok')">普通 🤔</button>
+      <button class="b-easy" onclick="revAns('easy')">記得 😎</button></div>`:""}`;
 }
-window.startRev = (mode) => { 
-  let ids = (mode === 'manual') ? shuffle(revUI.sel) : weightedSample(state.words, SESSION_SIZE).map(w=>w.id);
-  if(mode === 'manual') revUI.manual = false;
-  rev = { ids, idx:0, flipped:false, results:{hard:0,ok:0,easy:0} }; 
-  render(); 
-};
+window.startRev = () => { rev = { ids: weightedSample(state.words,SESSION_SIZE).map(w=>w.id), idx:0, flipped:false, results:{hard:0,ok:0,easy:0} }; render(); };
 window.revAns = kind => {
   const w = state.words.find(x=>x.id===rev.ids[rev.idx]);
   if(w) applyReview(w.id, kind==="hard"?-1:kind==="ok"?0:1);
@@ -560,33 +486,67 @@ window.revAns = kind => {
 };
 
 // ============ 測驗 ============
-const QUIZ_TYPES = { "mc-t2m":{name:"選擇題・看單字選意思",needs:4}, "mc-m2t":{name:"選擇題・看意思選單字",needs:4}, "type-t2m":{name:"打字題・看單字打意思",needs:1}, "type-m2t":{name:"打字題・看意思拼單字",needs:1} };
-let quizCfg = { lang:null, type:"mc-t2m", count:10 }, logUI = { expanded:null }, quiz = null, quizUI = { manual: false, sel: [] };
-window.toggleQuizSel = id => {
-  const idx = quizUI.sel.indexOf(id);
-  if(idx > -1) quizUI.sel.splice(idx, 1); else quizUI.sel.push(id);
-  const btn = document.getElementById("quiz-btn");
-  if(btn) { const needs = QUIZ_TYPES[quizCfg.type].needs; btn.textContent = `開始測驗（${quizUI.sel.length} 題）`; btn.disabled = quizUI.sel.length < needs; }
+const QUIZ_TYPES = {
+  "mc-t2m":  { name:"選擇題・看單字選意思", needs:4 },
+  "mc-m2t":  { name:"選擇題・看意思選單字", needs:4 },
+  "type-t2m":{ name:"打字題・看單字打意思", needs:1 },
+  "type-m2t":{ name:"打字題・看意思拼單字", needs:1 },
 };
-window.setQuizSelAll = (isAll) => {
-  const pool = langGroups()[quizCfg.lang] || [];
-  if(isAll) quizUI.sel = pool.map(w=>w.id); else quizUI.sel = [];
-  document.querySelectorAll('.quiz-cb').forEach(cb => cb.checked = isAll);
-  const btn = document.getElementById("quiz-btn");
-  if(btn) { const needs = QUIZ_TYPES[quizCfg.type].needs; btn.textContent = `開始測驗（${quizUI.sel.length} 題）`; btn.disabled = quizUI.sel.length < needs; }
-};
+let quizCfg = { lang:null, type:"mc-t2m", count:10 };
+let quiz = null;
 
-function renderQuiz(){ if(!state.words.length){ $("main").innerHTML=`<div class="empty">先到「單字庫」新增單字。</div>`; return; } if(!quiz) return renderQuizSetup(); if(quiz.finished) return renderQuizResult(); renderQuizPlay(); }
-function renderQuizSetup(){
-  const groups=langGroups(), langs=Object.keys(groups); if(!quizCfg.lang || !groups[quizCfg.lang]) quizCfg.lang=langs[0];
-  const pool=groups[quizCfg.lang]||[], needs=QUIZ_TYPES[quizCfg.type].needs, log=[...(state.quizLog||[])].slice(-5).reverse();
-  if(quizUI.manual){
-    $("main").innerHTML = `<div class="card"><b>手動挑選測驗單字</b><div class="hint">考區：${esc(quizCfg.lang)}（需 ${needs} 個字）</div><div style="display:flex; justify-content:space-between; margin:10px 0;"><button class="ghost" onclick="setQuizSelAll(true)">全選</button><button class="ghost" onclick="setQuizSelAll(false)">全不選</button></div><div style="max-height:40vh; overflow-y:auto; border:1px solid var(--line); border-radius:8px; margin-bottom:12px; background:var(--paper);">${pool.map(w=>`<label style="display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom:1px solid #e2e8f0; background:var(--card); margin:0;"><input type="checkbox" class="quiz-cb" ${quizUI.sel.includes(w.id)?'checked':''} onchange="toggleQuizSel('${w.id}')" style="width:20px;height:20px;margin:0;flex-shrink:0;"><div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.term)}</div><div class="small">${esc(w.meaning)}</div></div>${dots(w.mastery||0)}</label>`).join("")}</div><button id="quiz-btn" class="primary" onclick="startQuiz('manual')" ${quizUI.sel.length<needs?'disabled':''}>開始測驗（${quizUI.sel.length} 題）</button><button class="ghost" style="width:100%; margin-top:8px;" onclick="quizUI.manual=false; render()">取消</button></div>`;
-    return;
-  }
-  $("main").innerHTML = `<div class="card"><b>測驗設定</b><div class="small" style="margin:12px 0 6px">語言</div><div class="filter">${langs.map(l=>`<button class="${quizCfg.lang===l?"on":""}" onclick="quizCfg.lang='${esc(l)}';render()">${esc(l)}</button>`).join("")}</div><div class="small" style="margin:10px 0 6px">題型</div>${Object.entries(QUIZ_TYPES).map(([k,v])=>`<button class="opt ${quizCfg.type===k?"sel":""}" onclick="quizCfg.type='${k}';render()">${v.name}</button>`).join("")}</div><div class="row"><button class="primary" style="flex:2" onclick="startQuiz('auto')">隨機測驗</button><button class="ghost" style="flex:1" onclick="quizUI.manual=true; quizUI.sel=[]; render()">手動挑選</button></div>`;
+const langOf = w => w.lang || "未分類";
+function langGroups(){
+  const g={}; state.words.forEach(w=>{ (g[langOf(w)]=g[langOf(w)]||[]).push(w); }); return g;
 }
-window.startQuiz = (mode) => { const pool=langGroups()[quizCfg.lang]||[]; const n = (mode === 'manual') ? quizUI.sel.length : Math.min(quizCfg.count, pool.length); if(n<QUIZ_TYPES[quizCfg.type].needs) return; quiz = { cfg:{...quizCfg}, qs: (mode === 'manual' ? shuffle(quizUI.sel) : weightedSample(pool,n).map(w=>w.id)), idx:0, right:0, answered:0, chosen:null, opts:null, typed:null, finished:false, saved:false, detail:[] }; quizUI.manual = false; render(); };
+const curWord = () => state.words.find(x=>x.id===quiz.qs[quiz.idx]);
+const normAns = s => String(s||"").trim().toLowerCase().replace(/\s+/g," ");
+
+function renderQuiz(){
+  if(!state.words.length){ $("main").innerHTML=`<div class="empty">先到「單字庫」新增單字，就能開始測驗。</div>`; return; }
+  if(!quiz) return renderQuizSetup();
+  if(quiz.finished) return renderQuizResult();
+  renderQuizPlay();
+}
+
+function renderQuizSetup(){
+  const groups=langGroups(), langs=Object.keys(groups);
+  if(!quizCfg.lang || !groups[quizCfg.lang]) quizCfg.lang=langs[0];
+  const pool=groups[quizCfg.lang], needs=QUIZ_TYPES[quizCfg.type].needs;
+  const log=[...(state.quizLog||[])].slice(-5).reverse();
+  $("main").innerHTML = `
+    <div class="card">
+      <b>測驗設定</b>
+      <div class="small" style="margin:12px 0 6px">語言（一次只考一種）</div>
+      <div class="filter">${langs.map(l=>`<button class="${quizCfg.lang===l?"on":""}" onclick="quizCfg.lang='${esc(l)}';render()">${esc(l)}（${groups[l].length}）</button>`).join("")}</div>
+      <div class="small" style="margin:10px 0 6px">題型</div>
+      ${Object.entries(QUIZ_TYPES).map(([k,v])=>{
+        const dis = pool.length<v.needs;
+        return `<button class="opt ${quizCfg.type===k?"sel":""} ${dis?"dim":""}" ${dis?"disabled":""} onclick="quizCfg.type='${k}';render()">${v.name}${dis?`（需至少 ${v.needs} 個字）`:""}</button>`;
+      }).join("")}
+      <div class="small" style="margin:4px 0 6px">題數（這個語言共 ${pool.length} 個字）</div>
+      <div class="filter">
+        ${[5,10,20].map(n=>`<button class="${quizCfg.count===n?"on":""}" ${pool.length<n?"disabled":""} onclick="quizCfg.count=${n};render()">${n} 題</button>`).join("")}
+        <button class="${quizCfg.count==="all"?"on":""}" onclick="quizCfg.count='all';render()">全部（${pool.length}）</button>
+      </div>
+    </div>
+    <button class="primary" ${pool.length<needs?"disabled":""} onclick="startQuiz()">開始測驗</button>
+    ${log.length?`<div class="card" style="margin-top:12px"><b>測驗紀錄</b>${log.map(r=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px">
+        <span class="small">${new Date(r.at).toLocaleString("zh-TW",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>
+        <span style="flex:1;display:flex;gap:6px;align-items:center">${chip(r.lang)}<span class="small">${QUIZ_TYPES[r.type]?QUIZ_TYPES[r.type].name:esc(r.type)}</span></span>
+        <b style="color:${r.right/r.total>=0.8?"var(--ok)":"var(--ink-soft)"}">${r.right}/${r.total}</b>
+      </div>`).join("")}</div>`:""}`;
+}
+
+window.startQuiz = () => {
+  const pool=langGroups()[quizCfg.lang]||[];
+  if(pool.length<QUIZ_TYPES[quizCfg.type].needs) return;
+  const n = quizCfg.count==="all"?pool.length:Math.min(quizCfg.count,pool.length);
+  quiz = { cfg:{...quizCfg}, qs:weightedSample(pool,n).map(w=>w.id), idx:0, right:0, answered:0,
+    chosen:null, opts:null, typed:null, finished:false, saved:false, detail:[] };
+  render();
+};
 
 function renderQuizPlay(){
   let w=curWord();
@@ -594,25 +554,106 @@ function renderQuizPlay(){
   if(!w){ endQuiz(); return; }
   const t2m=quiz.cfg.type.endsWith("t2m"), isMC=quiz.cfg.type.startsWith("mc");
   const prompt = t2m?w.term:w.meaning;
-  const label = isMC ? (t2m?"這個單字的意思是？":"哪一個是這個意思的單字？") : (t2m?"這個單字是什麼意思？":"這個意思的單字怎麼寫？");
+  const label = isMC ? (t2m?"這個單字的意思是？":"哪一個是這個意思的單字？")
+                     : (t2m?"這個單字是什麼意思？":"這個意思的單字怎麼寫？");
   let body="";
   if(isMC){
-    if(!quiz.opts){ const pool=langGroups()[quiz.cfg.lang]||[]; quiz.opts=shuffle([w,...shuffle(pool.filter(x=>x.id!==w.id)).slice(0,3)]).map(x=>x.id); }
-    body = quiz.opts.map((id,i)=>{ const o=state.words.find(x=>x.id===id); if(!o) return ""; let cls=""; if(quiz.chosen!==null){ if(id===w.id) cls="right"; else if(i===quiz.chosen) cls="wrong"; else cls="dim"; } return `<button class="opt ${cls}" onclick="pickOpt(${i})">${esc(t2m?o.meaning:o.term)}</button>`; }).join("");
+    if(!quiz.opts){
+      const pool=langGroups()[quiz.cfg.lang]||[];
+      quiz.opts=shuffle([w,...shuffle(pool.filter(x=>x.id!==w.id)).slice(0,3)]).map(x=>x.id);
+    }
+    body = quiz.opts.map((id,i)=>{
+      const o=state.words.find(x=>x.id===id); if(!o) return "";
+      let cls="";
+      if(quiz.chosen!==null){
+        if(id===w.id) cls="right";
+        else if(i===quiz.chosen) cls="wrong";
+        else cls="dim";
+      }
+      return `<button class="opt ${cls}" onclick="pickOpt(${i})">${esc(t2m?o.meaning:o.term)}</button>`;
+    }).join("");
     if(quiz.chosen!==null) body += `<button class="primary" onclick="nextQ()">${quiz.idx+1>=quiz.qs.length?"看結果":"下一題 →"}</button>`;
   } else {
-    if(!quiz.typed){ body = `<input id="q-input" placeholder="輸入答案⋯" autocomplete="off" autocapitalize="none" spellcheck="false" onkeydown="if(event.key==='Enter')submitType()"><div class="row"><button class="primary" onclick="submitType()">送出答案</button><button class="ghost" onclick="giveUpType()">不會，看答案</button></div>`; } else { const ans=t2m?w.meaning:w.term; body = `<div class="card" style="border-color:${quiz.typed.correct?"#6ee7b7":"#fca5a5"}"><b style="color:${quiz.typed.correct?"var(--ok)":"var(--bad)"}">${quiz.typed.correct?"✓ 答對了！":"✗ 答錯了"}</b>${quiz.typed.val?`<div class="hint">你的答案：${esc(quiz.typed.val)}</div>`:""}<div class="hint">正確答案：<b>${esc(ans)}</b></div></div><button class="primary" onclick="nextQ()">${quiz.idx+1>=quiz.qs.length?"看結果":"下一題 →"}</button>`; }
+    if(!quiz.typed){
+      body = `<input id="q-input" placeholder="輸入答案⋯" autocomplete="off" autocapitalize="none" spellcheck="false" onkeydown="if(event.key==='Enter')submitType()">
+        <div class="row"><button class="primary" onclick="submitType()">送出答案</button>
+        <button class="ghost" onclick="giveUpType()">不會，看答案</button></div>`;
+    } else {
+      const ans=t2m?w.meaning:w.term;
+      body = `<div class="card" style="border-color:${quiz.typed.correct?"#6ee7b7":"#fca5a5"}">
+        <b style="color:${quiz.typed.correct?"var(--ok)":"var(--bad)"}">${quiz.typed.correct?"✓ 答對了！":"✗ 答錯了"}</b>
+        ${quiz.typed.val?`<div class="hint">你的答案：${esc(quiz.typed.val)}</div>`:""}
+        <div class="hint">正確答案：<b>${esc(ans)}</b></div></div>
+      <button class="primary" onclick="nextQ()">${quiz.idx+1>=quiz.qs.length?"看結果":"下一題 →"}</button>`;
+    }
   }
-  $("main").innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span class="small">第 ${quiz.idx+1} / ${quiz.qs.length} 題 · 答對 ${quiz.right}</span><button class="ghost" style="padding:7px 12px;font-size:14px" onclick="endQuiz()">提前結束</button></div><div class="bigcard" style="padding:22px"><div class="small">${label}</div><div style="font-size:${prompt.length>10?22:30}px;font-weight:700;margin:8px 0"><span class="term-hl">${esc(prompt)}</span></div>${chip(quiz.cfg.lang)}</div><div style="margin-top:14px">${body}</div>`;
+  $("main").innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span class="small">第 ${quiz.idx+1} / ${quiz.qs.length} 題 · 答對 ${quiz.right}</span>
+      <button class="ghost" style="padding:7px 12px;font-size:14px" onclick="endQuiz()">提前結束</button>
+    </div>
+    <div class="bigcard" style="padding:22px"><div class="small">${label}</div>
+      <div style="font-size:${prompt.length>10?22:30}px;font-weight:700;margin:8px 0"><span class="term-hl">${esc(prompt)}</span></div>${chip(quiz.cfg.lang)}</div>
+    <div style="margin-top:14px">${body}</div>`;
   const inp=$("q-input"); if(inp) inp.focus();
 }
 
-window.pickOpt = i => { if(quiz.chosen!==null) return; const w=curWord(); quiz.chosen=i; const correct = quiz.opts[i]===w.id; const picked = state.words.find(x=>x.id===quiz.opts[i]); const t2m = quiz.cfg.type.endsWith("t2m"); quiz.detail.push({term:w.term, meaning:w.meaning, ok:correct, given:picked?(t2m?picked.meaning:picked.term):""}); applyReview(w.id, correct?1:-1); quiz.right += correct?1:0; quiz.answered++; render(); };
-window.submitType = () => { if(quiz.typed) return; const val=$("q-input").value; if(!normAns(val)) return; const w=curWord(), t2m=quiz.cfg.type.endsWith("t2m"); const a=normAns(val), b=normAns(t2m?w.meaning:w.term); const correct = t2m ? (a===b || (a.length>=2 && (b.includes(a)||a.includes(b)))) : a===b; quiz.typed={val:val.trim(), correct}; quiz.detail.push({term:w.term, meaning:w.meaning, ok:correct, given:val.trim()}); applyReview(w.id, correct?1:-1); quiz.right += correct?1:0; quiz.answered++; render(); };
-window.giveUpType = () => { if(quiz.typed) return; const w=curWord(); quiz.typed={val:"", correct:false}; quiz.detail.push({term:w.term, meaning:w.meaning, ok:false, given:""}); applyReview(w.id,-1); quiz.answered++; render(); };
-window.nextQ = () => { quiz.idx++; quiz.chosen=null; quiz.opts=null; quiz.typed=null; if(quiz.idx>=quiz.qs.length) endQuiz(); else render(); };
-window.endQuiz = () => { quiz.finished=true; if(quiz.answered>0 && !quiz.saved){ quiz.saved=true; state.quizLog=[...(state.quizLog||[]), {at:Date.now(), lang:quiz.cfg.lang, type:quiz.cfg.type, right:quiz.right, total:quiz.answered, detail:quiz.detail}]; save(); } render(); };
-function renderQuizResult(){ const q=quiz, pct=q.answered?Math.round(q.right/q.answered*100):0; $("main").innerHTML = `<div class="card center"><div style="font-size:36px">${!q.answered?"🤷":pct>=80?"🎉":pct>=50?"👍":"💪"}</div><b style="font-size:20px">${q.answered?`答對 ${q.right} / ${q.answered} 題（${pct}%）`:"這次沒有作答"}</b><div class="hint" style="margin-top:8px;display:flex;justify-content:center;gap:6px;align-items:center">${chip(q.cfg.lang)}${QUIZ_TYPES[q.cfg.type].name}</div><div class="small" style="margin-top:10px">${q.answered?"✓ 成績已存入測驗紀錄":"未作答不留紀錄"}</div></div><button class="primary" onclick="startQuiz()">再測一次（同設定）</button><button class="ghost" style="width:100%;margin-top:8px" onclick="quiz=null;render()">回測驗設定</button>`; }
+window.pickOpt = i => {
+  if(quiz.chosen!==null) return;
+  const w=curWord();
+  quiz.chosen=i;
+  const correct = quiz.opts[i]===w.id;
+  const picked = state.words.find(x=>x.id===quiz.opts[i]);
+  const t2m = quiz.cfg.type.endsWith("t2m");
+  quiz.detail.push({term:w.term, meaning:w.meaning, ok:correct, given:picked?(t2m?picked.meaning:picked.term):""});
+  applyReview(w.id, correct?1:-1);
+  quiz.right += correct?1:0; quiz.answered++;
+  render();
+};
+window.submitType = () => {
+  if(quiz.typed) return;
+  const val=$("q-input").value;
+  if(!normAns(val)) return;
+  const w=curWord(), t2m=quiz.cfg.type.endsWith("t2m");
+  const a=normAns(val), b=normAns(t2m?w.meaning:w.term);
+  const correct = t2m ? (a===b || (a.length>=2 && (b.includes(a)||a.includes(b)))) : a===b;
+  quiz.typed={val:val.trim(), correct};
+  quiz.detail.push({term:w.term, meaning:w.meaning, ok:correct, given:val.trim()});
+  applyReview(w.id, correct?1:-1);
+  quiz.right += correct?1:0; quiz.answered++;
+  render();
+};
+window.giveUpType = () => {
+  if(quiz.typed) return;
+  const w=curWord();
+  quiz.typed={val:"", correct:false};
+  quiz.detail.push({term:w.term, meaning:w.meaning, ok:false, given:""});
+  applyReview(w.id,-1); quiz.answered++;
+  render();
+};
+window.nextQ = () => {
+  quiz.idx++; quiz.chosen=null; quiz.opts=null; quiz.typed=null;
+  if(quiz.idx>=quiz.qs.length) endQuiz(); else render();
+};
+window.endQuiz = () => {
+  quiz.finished=true;
+  if(quiz.answered>0 && !quiz.saved){
+    quiz.saved=true;
+    state.quizLog=[...(state.quizLog||[]), {at:Date.now(), lang:quiz.cfg.lang, type:quiz.cfg.type, right:quiz.right, total:quiz.answered, detail:quiz.detail}];
+    save();
+  }
+  render();
+};
+function renderQuizResult(){
+  const q=quiz, pct=q.answered?Math.round(q.right/q.answered*100):0;
+  $("main").innerHTML = `<div class="card center">
+    <div style="font-size:36px">${!q.answered?"🤷":pct>=80?"🎉":pct>=50?"👍":"💪"}</div>
+    <b style="font-size:20px">${q.answered?`答對 ${q.right} / ${q.answered} 題（${pct}%）`:"這次沒有作答"}</b>
+    <div class="hint" style="margin-top:8px;display:flex;justify-content:center;gap:6px;align-items:center">${chip(q.cfg.lang)}${QUIZ_TYPES[q.cfg.type].name}</div>
+    <div class="small" style="margin-top:10px">${q.answered?"✓ 成績已存入測驗紀錄":"未作答不留紀錄"}</div></div>
+  <button class="primary" onclick="startQuiz()">再測一次（同設定）</button>
+  <button class="ghost" style="width:100%;margin-top:8px" onclick="quiz=null;render()">回測驗設定</button>`;
+}
 
 // ============ 造句練習 ============
 let sen = { id:null, ai:null, loading:false, error:false };
@@ -621,7 +662,12 @@ function renderSentence(){
   if(!sen.id || !state.words.find(w=>w.id===sen.id)) pickSenWord(false);
   const w = state.words.find(x=>x.id===sen.id);
   $("main").innerHTML = `
-    <div class="bigcard" style="text-align:left;padding:20px"><div class="small">用這個單字造一個句子</div><div style="font-size:28px;font-weight:700;margin:8px 0"><span class="term-hl">${esc(w.term)}</span></div><div class="hint">${esc(w.meaning)}</div><div style="margin-top:8px;display:flex;gap:8px;align-items:center">${chip(w.lang)}${dots(w.mastery||0)}</div></div>
+    <div class="bigcard" style="text-align:left;padding:20px">
+      <div class="small">用這個單字造一個句子</div>
+      <div style="font-size:28px;font-weight:700;margin:8px 0"><span class="term-hl">${esc(w.term)}</span></div>
+      <div class="hint">${esc(w.meaning)}</div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">${chip(w.lang)}${dots(w.mastery||0)}</div>
+    </div>
     <textarea id="s-text" placeholder="用「${esc(w.term)}」寫一個句子⋯" style="margin-top:12px"></textarea>
     <div class="row"><button class="primary" onclick="saveSen()">儲存句子</button><button class="ghost" onclick="pickSenWord(true)">換一個字</button></div>
     <button class="accent" style="margin-top:12px" onclick="aiSen()" ${sen.loading?"disabled":""}>${sen.loading?"AI 造句中⋯":"✨ AI 幫我造一句"}</button>
@@ -629,8 +675,16 @@ function renderSentence(){
     ${sen.ai?`<div class="aibox"><div class="tag">AI 例句</div><div style="font-size:17px;line-height:1.7">${esc(sen.ai.sentence)}</div>${sen.ai.translation?`<div class="hint">${esc(sen.ai.translation)}</div>`:""}<div class="row" style="margin-top:10px"><button class="primary" style="padding:9px" onclick="saveAiSen()">存進單字本</button><button class="ghost" style="padding:9px" onclick="aiSen()">再造一句</button></div></div>`:""}
     ${(w.sentences||[]).length?`<div class="small" style="margin:16px 0 6px">這個字已收藏的句子</div>`+w.sentences.map(s=>`<div class="sent">${esc(s)}</div>`).join(""):""}`;
 }
-window.pickSenWord = (rerender) => { const [w]=weightedSample(state.words,1); sen={ id:w?w.id:null, ai:null, loading:false, error:false }; if(rerender) render(); };
-window.saveSen = () => { const t=$("s-text").value.trim(); if(!t) return; const w=state.words.find(x=>x.id===sen.id); w.sentences=[...(w.sentences||[]),t]; save(); render(); };
+window.pickSenWord = (rerender) => {
+  const [w]=weightedSample(state.words,1);
+  sen={ id:w?w.id:null, ai:null, loading:false, error:false };
+  if(rerender) render();
+};
+window.saveSen = () => {
+  const t=$("s-text").value.trim(); if(!t) return;
+  const w=state.words.find(x=>x.id===sen.id);
+  w.sentences=[...(w.sentences||[]),t]; save(); render();
+};
 window.aiSen = async () => {
   const w=state.words.find(x=>x.id===sen.id);
   if(!state.geminiKey){ sen.error=true; render(); return; }
@@ -642,7 +696,12 @@ window.aiSen = async () => {
   }catch(e){ sen.error=true; if(e.message && e.message.startsWith("HTTP")) aiErr=e.message; }
   sen.loading=false; render();
 };
-window.saveAiSen = () => { if(!sen.ai) return; const w=state.words.find(x=>x.id===sen.id); w.sentences=[...(w.sentences||[]), `${sen.ai.sentence}${sen.ai.translation?`｜${sen.ai.translation}`:""}（AI 例句）`]; sen.ai=null; save(); render(); };
+window.saveAiSen = () => {
+  if(!sen.ai) return;
+  const w=state.words.find(x=>x.id===sen.id);
+  w.sentences=[...(w.sentences||[]), `${sen.ai.sentence}${sen.ai.translation?`｜${sen.ai.translation}`:""}（AI 例句）`];
+  sen.ai=null; save(); render();
+};
 
 // ============ 設定（金鑰＋備份） ============
 let setUI = { mode:null, msg:null };
@@ -652,11 +711,19 @@ function renderSettings(){
       <input id="k-input" type="password" placeholder="貼上 AIza 開頭的金鑰" value="${esc(state.geminiKey)}" style="margin-top:10px">
       <button class="primary" onclick="saveKey()">儲存金鑰</button><div class="msg" id="k-msg">${state.geminiKey?"✓ 已設定，AI 功能已啟用":"尚未設定，AI 功能暫時停用（字形判斷仍可用）"}</div></div>
     <div class="card"><b>💾 備份與還原</b><p class="hint">資料存在這支手機的瀏覽器裡。<b>清除瀏覽器資料會連單字一起清掉</b>，建議定期匯出備份存到備忘錄或雲端筆記。</p>
-      <div class="row" style="margin-top:10px"><button class="ghost" style="${setUI.mode==="export"?"background:var(--ink);color:#fff;border-color:var(--ink)":""}" onclick="setUI.mode='export';setUI.msg=null;render()">匯出備份</button><button class="ghost" style="${setUI.mode==="import"?"background:var(--ink);color:#fff;border-color:var(--ink)":""}" onclick="setUI.mode='import';setUI.msg=null;render()">匯入還原</button></div>
-      ${setUI.mode==="export"?`<button class="accent" style="margin-top:12px" onclick="copyBackup()">一鍵複製全部資料</button><textarea readonly onclick="this.select()" style="margin-top:10px;font-size:11px;color:var(--faint)">${esc(JSON.stringify({version:1,exportedAt:Date.now(),words:state.words,quizLog:state.quizLog||[]}))}</textarea>`:""}
-      ${setUI.mode==="import"?`<textarea id="imp-text" placeholder="貼上備份文字⋯" style="margin-top:12px"></textarea><button class="primary" onclick="doImport()">匯入（重複的字會自動略過）</button>`:""}
+      <div class="row" style="margin-top:10px">
+        <button class="ghost" style="${setUI.mode==="export"?"background:var(--ink);color:#fff;border-color:var(--ink)":""}" onclick="setUI.mode='export';setUI.msg=null;render()">匯出備份</button>
+        <button class="ghost" style="${setUI.mode==="import"?"background:var(--ink);color:#fff;border-color:var(--ink)":""}" onclick="setUI.mode='import';setUI.msg=null;render()">匯入還原</button>
+      </div>
+      ${setUI.mode==="export"?`
+        <button class="accent" style="margin-top:12px" onclick="copyBackup()">一鍵複製全部資料</button>
+        <textarea readonly onclick="this.select()" style="margin-top:10px;font-size:11px;color:var(--faint)">${esc(JSON.stringify({version:1,exportedAt:Date.now(),words:state.words,quizLog:state.quizLog||[]}))}</textarea>`:""}
+      ${setUI.mode==="import"?`
+        <textarea id="imp-text" placeholder="貼上備份文字⋯" style="margin-top:12px"></textarea>
+        <button class="primary" onclick="doImport()">匯入（重複的字會自動略過）</button>`:""}
       ${setUI.msg?`<div class="msg">${esc(setUI.msg)}</div>`:""}
-    </div><div class="small center" style="margin-top:20px">我的單字本 · 資料完全屬於你自己</div>`;
+    </div>
+    <div class="small center" style="margin-top:20px">我的單字本 · 資料完全屬於你自己</div>`;
 }
 window.saveKey = async () => {
   state.geminiKey = $("k-input").value.trim(); save();
@@ -666,16 +733,26 @@ window.saveKey = async () => {
 };
 window.copyBackup = async () => {
   const txt = JSON.stringify({version:1,exportedAt:Date.now(),words:state.words,quizLog:state.quizLog||[]});
-  try{ await navigator.clipboard.writeText(txt); setUI.msg="已複製到剪貼簿 ✓ 快貼到備忘錄存起來"; }catch(e){ setUI.msg="自動複製失敗，請長按下方文字手動全選複製"; } render();
+  try{ await navigator.clipboard.writeText(txt); setUI.msg="已複製到剪貼簿 ✓ 快貼到備忘錄存起來"; }
+  catch(e){ setUI.msg="自動複製失敗，請長按下方文字手動全選複製"; }
+  render();
 };
 window.doImport = () => {
   try{
-    const data = JSON.parse($("imp-text").value.trim()); const incoming = Array.isArray(data.words)?data.words:Array.isArray(data)?data:null;
-    if(!incoming) throw 0; const existing = new Set(state.words.map(w=>w.term+"␟"+(w.lang||"")));
-    const fresh = incoming.filter(w=>w&&w.term&&!existing.has(w.term+"␟"+(w.lang||""))); state.words = [...fresh, ...state.words];
-    if(Array.isArray(data.quizLog)){ const seenAt = new Set((state.quizLog||[]).map(r=>r.at)); state.quizLog = [...(state.quizLog||[]), ...data.quizLog.filter(r=>r&&r.at&&r.total&&!seenAt.has(r.at))].sort((a,b)=>a.at-b.at); }
-    save(); setUI.msg = `已匯入 ${fresh.length} 個新單字（重複的 ${incoming.length-fresh.length} 個已略過）`;
-  }catch(e){ setUI.msg = "看不懂這段內容，請確認貼上的是之前匯出的完整備份文字。"; } render();
+    const data = JSON.parse($("imp-text").value.trim());
+    const incoming = Array.isArray(data.words)?data.words:Array.isArray(data)?data:null;
+    if(!incoming) throw 0;
+    const existing = new Set(state.words.map(w=>w.term+"␟"+(w.lang||"")));
+    const fresh = incoming.filter(w=>w&&w.term&&!existing.has(w.term+"␟"+(w.lang||"")));
+    state.words = [...fresh, ...state.words];
+    if(Array.isArray(data.quizLog)){
+      const seenAt = new Set((state.quizLog||[]).map(r=>r.at));
+      state.quizLog = [...(state.quizLog||[]), ...data.quizLog.filter(r=>r&&r.at&&r.total&&!seenAt.has(r.at))].sort((a,b)=>a.at-b.at);
+    }
+    save();
+    setUI.msg = `已匯入 ${fresh.length} 個新單字（重複的 ${incoming.length-fresh.length} 個已略過）`;
+  }catch(e){ setUI.msg = "看不懂這段內容，請確認貼上的是之前匯出的完整備份文字。"; }
+  render();
 };
 
 // ============ 啟動 ============
