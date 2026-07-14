@@ -241,8 +241,15 @@ function renderList(){
     h += `<button class="primary" onclick="listUI.showForm=true;render()" style="margin-bottom:12px">＋ 新增單字</button>`;
   } else {
     h += `<div class="card">
+      <!-- 這裡保留了 onblur="onTermBlur()"，讓語言偵測全自動 -->
       <input id="f-term" placeholder="單字（如 serendipity / 사랑 / 猫）" oninput="onTermInput(this.value)" onblur="onTermBlur()">
-      <input id="f-meaning" placeholder="意思／翻譯（留空可由 AI 自動填）">
+      
+      <!-- 意思輸入框與旁邊專屬的 AI 翻譯按鈕排在同一列 -->
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <input id="f-meaning" placeholder="意思／翻譯" style="margin-bottom:0;">
+        <button class="accent" style="width:auto; padding:0 16px; border-radius:10px; flex-shrink:0; font-size:15px;" onclick="triggerAITranslate()">✨ AI 翻譯</button>
+      </div>
+
       <div class="row">
         <input id="f-lang" placeholder="語言（自動偵測，可修改）">
         <input id="f-note" placeholder="備註（選填）">
@@ -300,30 +307,48 @@ window.onTermInput = v => { // 字形明確的語言即時判斷
     if(l) langEl.value=l;
   }
 };
-window.onTermBlur = async () => { // 有歧義的語言交給 AI 判斷；意思留空則 AI 自動翻譯（需 Gemini 金鑰）
+window.onTermBlur = async () => { 
   const term=$("f-term")?.value.trim(), langEl=$("f-lang"), msg=$("f-msg");
   if(!term) return;
+  
   if(langEl && !langEl.value.trim()){
     const byScript = detectByScript(term);
-    if(byScript) langEl.value=byScript;
-    else if(state.geminiKey){
+    if(byScript) {
+      langEl.value = byScript;
+    } else if(state.geminiKey){
       if(msg) msg.textContent="AI 判斷語言中⋯";
       const l = await detectLangAI(term) || (looksEnglish(term)?"英文":null);
       if(l && !langEl.value.trim()) langEl.value=l;
-      if(msg) msg.textContent="";
+      if(msg) msg.textContent=""; // 語言填完就清空提示
+    } else if(looksEnglish(term)){
+      langEl.value = "英文";
     }
-    else if(looksEnglish(term)) langEl.value="英文";
   }
-  const meanEl=$("f-meaning");
-  if(meanEl && !meanEl.value.trim()){
-    if(!state.geminiKey){
-      if(msg) msg.textContent="提示：到「設定」填入 Gemini 金鑰，就能自動判斷語言、自動翻譯意思";
-      return;
-    }
-    if(msg) msg.textContent="AI 翻譯中⋯";
-    const t = await translateAI(term, langEl?langEl.value.trim():"");
-    if(t && !meanEl.value.trim()) meanEl.value=t;
-    if(msg) msg.textContent = t?"✓ 已自動填入 AI 翻譯，可自行修改":"AI 翻譯失敗，請手動填意思或稍後再試";
+};
+
+window.triggerAITranslate = async () => {
+  const term = $("f-term")?.value.trim();
+  const langEl = $("f-lang");
+  const meanEl = $("f-meaning");
+  const msg = $("f-msg");
+
+  if (!term) {
+    if (msg) msg.textContent = "請先輸入單字！";
+    return;
+  }
+  if (!state.geminiKey) {
+    if (msg) msg.textContent = "提示：到「設定」填入 Gemini 金鑰，才能使用 AI 翻譯功能";
+    return;
+  }
+
+  if (msg) msg.textContent = "✨ AI 翻譯中⋯";
+  const t = await translateAI(term, langEl ? langEl.value.trim() : "");
+  
+  if (t) {
+    if (meanEl) meanEl.value = t;
+    if (msg) msg.textContent = "✓ 已自動填入 AI 翻譯，可自行修改";
+  } else {
+    if (msg) msg.textContent = "AI 翻譯失敗，請手動填意思或稍後再試";
   }
 };
 window.addWord = () => {
