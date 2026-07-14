@@ -378,15 +378,46 @@ window.triggerAITranslate = async () => {
   const t = await translateAI(term, langEl ? langEl.value.trim() : "");
   if (t) { if (meanEl) meanEl.value = t; if (msg) msg.textContent = "✓ 已自動填入 AI 翻譯"; } else { if (msg) msg.textContent = "AI 翻譯失敗，請手動輸入" + (aiErr?`（${aiErr}）`:""); }
 };
-
+// 1. 手動新增單字（自動轉小寫＋防重複）
 window.addWord = () => {
-  const term=$("f-term").value.trim(), meaning=$("f-meaning").value.trim();
-  if(!term||!meaning){ $("f-msg").textContent="單字和意思都要填喔"; return; }
-  state.words.unshift({ id:uid(), term, meaning, lang:$("f-lang").value.trim()||detectByScript(term)||(looksEnglish(term)?"英文":""), note:$("f-note").value.trim(),
-    mastery:0, reviews:0, sentences:[], createdAt:Date.now(), lastReviewed:null });
-  save(); listUI.showForm=false; render();
+  let term = $("f-term").value.trim();
+  const meaning = $("f-meaning").value.trim();
+  
+  if(!term || !meaning){ 
+    $("f-msg").textContent = "單字和意思都要填喔"; 
+    return; 
+  }
+  
+  // 轉成全小寫
+  term = term.toLowerCase();
+
+  // 檢查有沒有重複的單字
+  const isDuplicate = state.words.some(w => w.term.toLowerCase() === term);
+  if (isDuplicate) {
+    $("f-msg").textContent = "⚠️ 這個單字已經在單字本裡面囉！";
+    return;
+  }
+
+  // 通過檢查，存入單字本
+  state.words.unshift({ 
+    id: uid(), 
+    term: term, 
+    meaning: meaning, 
+    lang: $("f-lang").value.trim() || detectByScript(term) || (looksEnglish(term) ? "英文" : ""), 
+    note: $("f-note").value.trim(),
+    mastery: 0, 
+    reviews: 0, 
+    sentences: [], 
+    createdAt: Date.now(), 
+    lastReviewed: null 
+  });
+  
+  save(); 
+  listUI.showForm = false; 
+  render();
 };
 
+// 2. AI 圖片/PDF 匯入單字（自動轉小寫＋防重複）
 window.extractWordsAI = async () => {
   const fileInp = $("f-file");
   const promptInp = $("f-prompt");
@@ -424,27 +455,37 @@ window.extractWordsAI = async () => {
     if (!Array.isArray(words) || words.length === 0) throw new Error("找不到符合規則的單字");
 
     let added = 0;
+    let skipped = 0; // 紀錄跳過幾個重複單字
+    
     words.forEach(w => {
        if (w.term && w.meaning) {
-          state.words.unshift({
-             id: uid(), term: w.term, meaning: w.meaning, lang: w.lang || "未分類",
-             note: "AI 圖片/PDF 匯入", mastery: 0, reviews: 0, sentences: [],
-             createdAt: Date.now(), lastReviewed: null
-          });
-          added++;
+          const term = w.term.trim().toLowerCase(); // 統一轉小寫
+          
+          // 檢查重複
+          const isDuplicate = state.words.some(existing => existing.term.toLowerCase() === term);
+          
+          if (isDuplicate) {
+             skipped++;
+          } else {
+             state.words.unshift({
+                id: uid(), term: term, meaning: w.meaning.trim(), lang: w.lang || "未分類",
+                note: "AI 圖片/PDF 匯入", mastery: 0, reviews: 0, sentences: [],
+                createdAt: Date.now(), lastReviewed: null
+             });
+             added++;
+          }
        }
     });
 
     save();
     listUI.showUploadForm = false;
     render();
-    alert(`🎉 成功解析並匯入 ${added} 個單字！`);
+    alert(`🎉 成功解析並匯入 ${added} 個單字！${skipped > 0 ? `\n（有 ${skipped} 個重複單字已自動略過）` : ""}`);
 
   } catch (e) {
      msg.textContent = "擷取失敗：" + e.message;
   }
 };
-
 window.delWord = id => {
   if(!confirm("確定要刪除這個單字？")) return;
   state.words = state.words.filter(w=>w.id!==id); save(); renderStats(); renderListOnly(); 
