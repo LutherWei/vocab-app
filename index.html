@@ -286,6 +286,15 @@ function renderList(){
   }
   $("main").innerHTML = h;
 }
+function renderListOnly(){ // 搜尋時只更新列表，避免輸入框失焦
+  const el=$("wordlist"); if(!el) { render(); return; }
+  const u=listUI, q=u.query.trim().toLowerCase();
+  const filtered = state.words
+    .filter(w=>u.lang==="全部"||w.lang===u.lang)
+    .filter(w=>!q||w.term.toLowerCase().includes(q)||(w.meaning||"").toLowerCase().includes(q))
+    .sort((a,b)=>(a.mastery||0)-(b.mastery||0)||b.createdAt-a.createdAt);
+  el.innerHTML = filtered.length?filtered.map(wordCard).join(""):`<div class="empty">找不到符合的單字。</div>`;
+}
 function wordCard(w){
   const open = listUI.expanded===w.id;
   let body="";
@@ -298,20 +307,13 @@ function wordCard(w){
     </div>`;
   }
   return `<div class="word">
-    <div class="word-head" onclick="listUI.expanded=${open?"null":`'${w.id}'`};render()">
+    <!-- 這裡把原本的 render() 改成了 renderListOnly() -->
+    <div class="word-head" onclick="listUI.expanded=${open?"null":`'${w.id}'`};renderListOnly()">
       <div class="l"><div class="t"><span class="term-hl">${esc(w.term)}</span></div><div class="m">${esc(w.meaning)}</div></div>
       <div class="r">${dots(w.mastery||0)}<div style="display:flex;gap:5px;align-items:center">${chip(w.lang)}<span class="lv">${MASTERY_LABELS[w.mastery||0]}</span></div></div>
     </div>${body}</div>`;
 }
-function renderListOnly(){ // 搜尋時只更新列表，避免輸入框失焦
-  const el=$("wordlist"); if(!el) { render(); return; }
-  const u=listUI, q=u.query.trim().toLowerCase();
-  const filtered = state.words
-    .filter(w=>u.lang==="全部"||w.lang===u.lang)
-    .filter(w=>!q||w.term.toLowerCase().includes(q)||(w.meaning||"").toLowerCase().includes(q))
-    .sort((a,b)=>(a.mastery||0)-(b.mastery||0)||b.createdAt-a.createdAt);
-  el.innerHTML = filtered.length?filtered.map(wordCard).join(""):`<div class="empty">找不到符合的單字。</div>`;
-}
+
 window.onTermInput = v => { // 字形明確的語言即時判斷
   const langEl=$("f-lang");
   if(langEl && !langEl.value.trim()){
@@ -377,7 +379,12 @@ window.addWord = () => {
 };
 window.delWord = id => {
   if(!confirm("確定要刪除這個單字？")) return;
-  state.words = state.words.filter(w=>w.id!==id); save(); render();
+  state.words = state.words.filter(w=>w.id!==id); 
+  save(); 
+  
+  // 改成局部更新：只重畫統計數字跟列表，不再呼叫全域的 render()
+  renderStats(); 
+  renderListOnly(); 
 };
 
 // ============ 複習（單字卡） ============
@@ -388,7 +395,26 @@ window.toggleRevSel = id => {
   const idx = revUI.sel.indexOf(id);
   if(idx > -1) revUI.sel.splice(idx, 1);
   else revUI.sel.push(id);
-  render();
+  
+  // 局部更新：只改按鈕文字與狀態，不重新 render()
+  const btn = document.getElementById("rev-btn");
+  if(btn) {
+    btn.textContent = `開始複習（${revUI.sel.length} 張）`;
+    btn.disabled = revUI.sel.length === 0;
+  }
+};
+
+// 新增全選/全不選的局部更新邏輯
+window.setRevSelAll = (isAll) => {
+  if(isAll) revUI.sel = state.words.map(w=>w.id);
+  else revUI.sel = [];
+  
+  document.querySelectorAll('.rev-cb').forEach(cb => cb.checked = isAll);
+  const btn = document.getElementById("rev-btn");
+  if(btn) {
+    btn.textContent = `開始複習（${revUI.sel.length} 張）`;
+    btn.disabled = revUI.sel.length === 0;
+  }
 };
 
 function renderReview(){
@@ -399,19 +425,19 @@ function renderReview(){
   if(!rev && revUI.manual){
     $("main").innerHTML = `<div class="card"><b>手動挑選複習單字</b>
       <div style="display:flex; justify-content:space-between; margin:10px 0;">
-        <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="revUI.sel=state.words.map(w=>w.id); render()">全選</button>
-        <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="revUI.sel=[]; render()">全不選</button>
+        <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="setRevSelAll(true)">全選</button>
+        <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="setRevSelAll(false)">全不選</button>
       </div>
       <div style="max-height: 45vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; margin-bottom:12px; background:var(--paper);">
         ${ws.map(w=>`
           <label style="display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom: 1px solid #e2e8f0; background:var(--card); margin:0;">
-            <input type="checkbox" ${revUI.sel.includes(w.id)?'checked':''} onchange="toggleRevSel('${w.id}')" style="width:20px;height:20px;margin:0;flex-shrink:0;">
+            <input type="checkbox" class="rev-cb" ${revUI.sel.includes(w.id)?'checked':''} onchange="toggleRevSel('${w.id}')" style="width:20px;height:20px;margin:0;flex-shrink:0;">
             <div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.term)}</div><div class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.meaning)}</div></div>
             ${dots(w.mastery||0)}
           </label>
         `).join("")}
       </div>
-      <button class="primary" onclick="startRev('manual')" ${revUI.sel.length===0?'disabled':''}>開始複習（${revUI.sel.length} 張）</button>
+      <button id="rev-btn" class="primary" onclick="startRev('manual')" ${revUI.sel.length===0?'disabled':''}>開始複習（${revUI.sel.length} 張）</button>
       <button class="ghost" style="width:100%; margin-top:8px;" onclick="revUI.manual=false; render()">取消</button>
     </div>`;
     return;
@@ -490,22 +516,30 @@ window.toggleQuizSel = id => {
   const idx = quizUI.sel.indexOf(id);
   if(idx > -1) quizUI.sel.splice(idx, 1);
   else quizUI.sel.push(id);
-  render();
+  
+  // 局部更新：只改按鈕
+  const btn = document.getElementById("quiz-btn");
+  if(btn) {
+    const needs = QUIZ_TYPES[quizCfg.type].needs;
+    btn.textContent = `開始測驗（${quizUI.sel.length} 題）`;
+    btn.disabled = quizUI.sel.length < needs;
+  }
 };
 
-const langOf = w => w.lang || "未分類";
-function langGroups(){
-  const g={}; state.words.forEach(w=>{ (g[langOf(w)]=g[langOf(w)]||[]).push(w); }); return g;
-}
-const curWord = () => state.words.find(x=>x.id===quiz.qs[quiz.idx]);
-const normAns = s => String(s||"").trim().toLowerCase().replace(/\s+/g," ");
-
-function renderQuiz(){
-  if(!state.words.length){ $("main").innerHTML=`<div class="empty">先到「單字庫」新增單字，就能開始測驗。</div>`; return; }
-  if(!quiz) return renderQuizSetup();
-  if(quiz.finished) return renderQuizResult();
-  renderQuizPlay();
-}
+// 新增全選/全不選的局部更新邏輯
+window.setQuizSelAll = (isAll) => {
+  const pool = langGroups()[quizCfg.lang] || [];
+  if(isAll) quizUI.sel = pool.map(w=>w.id);
+  else quizUI.sel = [];
+  
+  document.querySelectorAll('.quiz-cb').forEach(cb => cb.checked = isAll);
+  const btn = document.getElementById("quiz-btn");
+  if(btn) {
+    const needs = QUIZ_TYPES[quizCfg.type].needs;
+    btn.textContent = `開始測驗（${quizUI.sel.length} 題）`;
+    btn.disabled = quizUI.sel.length < needs;
+  }
+};
 
 function renderQuizSetup(){
   const groups=langGroups(), langs=Object.keys(groups);
@@ -520,24 +554,23 @@ function renderQuizSetup(){
        <div class="card"><b>手動挑選測驗單字</b>
          <div class="hint" style="margin-bottom:8px;">考區：${esc(quizCfg.lang)}（需至少選 ${needs} 個字）</div>
          <div style="display:flex; justify-content:space-between; margin:10px 0;">
-           <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="quizUI.sel=langGroups()['${esc(quizCfg.lang)}'].map(w=>w.id); render()">全選</button>
-           <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="quizUI.sel=[]; render()">全不選</button>
+           <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="setQuizSelAll(true)">全選</button>
+           <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="setQuizSelAll(false)">全不選</button>
          </div>
          <div style="max-height: 40vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; margin-bottom:12px; background:var(--paper);">
            ${pool.map(w=>`
              <label style="display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom: 1px solid #e2e8f0; background:var(--card); margin:0;">
-               <input type="checkbox" ${quizUI.sel.includes(w.id)?'checked':''} onchange="toggleQuizSel('${w.id}')" style="width:20px;height:20px;margin:0;flex-shrink:0;">
+               <input type="checkbox" class="quiz-cb" ${quizUI.sel.includes(w.id)?'checked':''} onchange="toggleQuizSel('${w.id}')" style="width:20px;height:20px;margin:0;flex-shrink:0;">
                <div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.term)}</div><div class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.meaning)}</div></div>
                ${dots(w.mastery||0)}
              </label>
            `).join("")}
          </div>
-         <button class="primary" onclick="startQuiz('manual')" ${quizUI.sel.length<needs?'disabled':''}>開始測驗（${quizUI.sel.length} 題）</button>
+         <button id="quiz-btn" class="primary" onclick="startQuiz('manual')" ${quizUI.sel.length<needs?'disabled':''}>開始測驗（${quizUI.sel.length} 題）</button>
          <button class="ghost" style="width:100%; margin-top:8px;" onclick="quizUI.manual=false; render()">取消</button>
        </div>`;
      return;
   }
-
   // 畫面 2：一般的測驗設定
   $("main").innerHTML = `
     <div class="card">
