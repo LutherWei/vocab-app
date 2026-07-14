@@ -631,7 +631,7 @@ function renderQuizSetup(){
     </div>
     
     ${log.length?`<div class="card" style="margin-top:12px"><b>測驗紀錄</b><div class="small" style="margin-top:4px">點一筆可展開逐題結果</div>${log.map(r=>`
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;cursor:pointer" onclick="logUI.expanded=logUI.expanded===${r.at}?null:${r.at};render()">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;cursor:pointer" onclick="logUI.expanded=logUI.expanded===${r.at}?null:${r.at};renderQuizSetup()">
         <span class="small">${new Date(r.at).toLocaleString("zh-TW",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>
         <span style="flex:1;display:flex;gap:6px;align-items:center">${chip(r.lang)}<span class="small">${QUIZ_TYPES[r.type]?QUIZ_TYPES[r.type].name:esc(r.type)}</span></span>
         <b style="color:${r.right/r.total>=0.8?"var(--ok)":"var(--ink-soft)"}">${r.right}/${r.total} ${logUI.expanded===r.at?"▾":"▸"}</b>
