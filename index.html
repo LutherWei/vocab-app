@@ -494,6 +494,15 @@ const QUIZ_TYPES = {
 };
 let quizCfg = { lang:null, type:"mc-t2m", count:10 };
 let quiz = null;
+let quizUI = { manual: false, sel: [] };
+let logUI = { expanded: null };
+
+window.toggleQuizSel = id => {
+  const idx = quizUI.sel.indexOf(id);
+  if(idx > -1) quizUI.sel.splice(idx, 1);
+  else quizUI.sel.push(id);
+  render();
+};
 
 const langOf = w => w.lang || "未分類";
 function langGroups(){
