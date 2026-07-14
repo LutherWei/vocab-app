@@ -171,6 +171,7 @@ const looksEnglish = t => /^[A-Za-z][A-Za-z' .-]*$/.test(t);
   state.words.forEach(w => { if(!w.lang && looksEnglish(w.term)){ w.lang = "英文"; migrated = true; } });
   if(migrated) save();
 }
+let aiErr = ""; // 最近一次 AI 錯誤的完整原因，供各畫面顯示
 async function gemini(prompt){
   if(!state.geminiKey) return null;
   const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=" + encodeURIComponent(state.geminiKey);
@@ -178,7 +179,12 @@ async function gemini(prompt){
     method:"POST", headers:{"Content-Type":"application/json"},
     body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
   });
-  if(!res.ok) throw new Error("api");
+  if(!res.ok){
+    let detail = "";
+    try{ const e = await res.json(); detail = e.error?.message || ""; }catch(_){}
+    throw new Error(`HTTP ${res.status}${detail?"：" + detail:""}`);
+  }
+  aiErr = "";
   const data = await res.json();
   return ((data.candidates||[])[0]?.content?.parts||[]).map(p=>p.text||"").join("").trim();
 }
@@ -188,13 +194,13 @@ async function detectLangAI(term){
     // 放寬字數限制到 10，並自動清除結尾的換行或句點
     const cleanT = (t || "").replace(/[\n。]/g, "").trim();
     return (cleanT && cleanT.length <= 10) ? cleanT : null;
-  }catch(e){ return null; }
+  }catch(e){ aiErr = e.message; return null; }
 }
 async function translateAI(term, lang){
   try{
     const t = await gemini(`請把${lang?lang+"的":""}單字「${term}」翻譯成繁體中文，作為單字本「意思」欄位的內容。回覆要簡短不要超過40個字元（例如：蘋果、跑步；奔跑），多個意思用「；」分隔。只回覆意思本身，不要拼音、例句或任何其他文字。`);
     return (t && t.length<=40) ? t : null;
-  }catch(e){ return null; }
+  }catch(e){ aiErr = e.message; return null; }
 }
 
 // ============ 資料操作 ============
@@ -331,7 +337,7 @@ window.triggerAILang = async () => {
     if (langEl) langEl.value = l;
     if (msg) msg.textContent = "✓ 已填入語言";
   } else {
-    if (msg) msg.textContent = "語言判斷失敗，請手動輸入";
+    if (msg) msg.textContent = "語言判斷失敗，請手動輸入" + (aiErr?`（${aiErr}）`:"");
   }
 };
 
@@ -359,7 +365,7 @@ window.triggerAITranslate = async () => {
     if (meanEl) meanEl.value = t;
     if (msg) msg.textContent = "✓ 已自動填入 AI 翻譯";
   } else {
-    if (msg) msg.textContent = "AI 翻譯失敗，請手動輸入";
+    if (msg) msg.textContent = "AI 翻譯失敗，請手動輸入" + (aiErr?`（${aiErr}）`:"");
   }
 };
 window.addWord = () => {
@@ -621,7 +627,7 @@ function renderSentence(){
     <textarea id="s-text" placeholder="用「${esc(w.term)}」寫一個句子⋯" style="margin-top:12px"></textarea>
     <div class="row"><button class="primary" onclick="saveSen()">儲存句子</button><button class="ghost" onclick="pickSenWord(true)">換一個字</button></div>
     <button class="accent" style="margin-top:12px" onclick="aiSen()" ${sen.loading?"disabled":""}>${sen.loading?"AI 造句中⋯":"✨ AI 幫我造一句"}</button>
-    ${sen.error?`<div class="msg err center">${state.geminiKey?"AI 造句沒有成功，請再按一次試試。":"要用 AI 造句，請先到「設定」填入 Gemini API 金鑰（免費申請）。"}</div>`:""}
+    ${sen.error?`<div class="msg err center">${state.geminiKey?"AI 造句沒有成功，請再按一次試試。"+(aiErr?`<br>原因：${esc(aiErr)}`:""):"要用 AI 造句，請先到「設定」填入 Gemini API 金鑰（免費申請）。"}</div>`:""}
     ${sen.ai?`<div class="aibox"><div class="tag">AI 例句</div>
       <div style="font-size:17px;line-height:1.7">${esc(sen.ai.sentence)}</div>
       ${sen.ai.translation?`<div class="hint">${esc(sen.ai.translation)}</div>`:""}
@@ -648,7 +654,7 @@ window.aiSen = async () => {
     const raw = await gemini(`請用${w.lang?w.lang+"的":""}單字「${w.term}」（意思：${w.meaning}）造一個自然、貼近日常生活的例句，難度適合語言學習者，句子不要太長。只回覆 JSON，格式如下，不要任何其他文字、說明或 Markdown 標記：{"sentence":"例句原文","translation":"例句的繁體中文翻譯"}`);
     const parsed = JSON.parse(raw.replace(/```json|```/g,"").trim());
     if(parsed.sentence) sen.ai=parsed; else sen.error=true;
-  }catch(e){ sen.error=true; }
+  }catch(e){ sen.error=true; if(e.message && e.message.startsWith("HTTP")) aiErr=e.message; }
   sen.loading=false; render();
 };
 window.saveAiSen = () => {
@@ -684,9 +690,16 @@ function renderSettings(){
     </div>
     <div class="small center" style="margin-top:20px">我的單字本 · 資料完全屬於你自己</div>`;
 }
-window.saveKey = () => {
+window.saveKey = async () => {
   state.geminiKey = $("k-input").value.trim(); save();
-  $("k-msg").textContent = state.geminiKey?"✓ 已儲存，AI 功能已啟用":"已清除金鑰";
+  if(!state.geminiKey){ $("k-msg").textContent="已清除金鑰"; return; }
+  $("k-msg").textContent = "已儲存，測試連線中⋯";
+  try{
+    await gemini("請只回覆兩個字：成功");
+    $("k-msg").textContent = "✓ 金鑰有效，AI 功能已啟用";
+  }catch(e){
+    $("k-msg").textContent = "✗ 金鑰測試失敗（" + e.message + "）";
+  }
 };
 window.copyBackup = async () => {
   const txt = JSON.stringify({version:1,exportedAt:Date.now(),words:state.words,quizLog:state.quizLog||[]});
