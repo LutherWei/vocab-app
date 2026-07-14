@@ -243,19 +243,23 @@ function renderList(){
     h += `<button class="primary" onclick="listUI.showForm=true;render()" style="margin-bottom:12px">＋ 新增單字</button>`;
   } else {
     h += `<div class="card">
-      <!-- 這裡保留了 onblur="onTermBlur()"，讓語言偵測全自動 -->
-      <input id="f-term" placeholder="單字（如 serendipity / 사랑 / 猫）" oninput="onTermInput(this.value)" onblur="onTermBlur()">
+      <!-- 拿掉 onblur，只保留輸入時的基本字形判斷 -->
+      <input id="f-term" placeholder="單字（如 serendipity / 사랑 / 猫）" oninput="onTermInput(this.value)">
       
-      <!-- 意思輸入框與旁邊專屬的 AI 翻譯按鈕排在同一列 -->
+      <!-- 語言輸入框 ＋ 偵測按鈕 -->
       <div style="display:flex; gap:8px; margin-bottom:10px;">
-        <input id="f-meaning" placeholder="意思／翻譯" style="margin-bottom:0;">
-        <button class="accent" style="width:auto; padding:0 16px; border-radius:10px; flex-shrink:0; font-size:15px;" onclick="triggerAITranslate()">✨ AI 翻譯</button>
+        <input id="f-lang" placeholder="語言（可點擊右側偵測）" style="margin-bottom:0;">
+        <button class="ghost" style="width:auto; padding:0 14px; border-radius:10px; flex-shrink:0; font-size:15px; color:var(--ink); border-color:var(--line);" onclick="triggerAILang()">🌐 偵測</button>
       </div>
 
-      <div class="row">
-        <input id="f-lang" placeholder="語言（自動偵測，可修改）">
-        <input id="f-note" placeholder="備註（選填）">
+      <!-- 意思輸入框 ＋ 翻譯按鈕 -->
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <input id="f-meaning" placeholder="意思／翻譯" style="margin-bottom:0;">
+        <button class="accent" style="width:auto; padding:0 14px; border-radius:10px; flex-shrink:0; font-size:15px;" onclick="triggerAITranslate()">✨ 翻譯</button>
       </div>
+
+      <input id="f-note" placeholder="備註（選填）">
+      
       <div class="msg" id="f-msg"></div>
       <div class="row" style="margin-top:4px">
         <button class="primary" onclick="addWord()">加入單字本</button>
@@ -309,51 +313,41 @@ window.onTermInput = v => { // 字形明確的語言即時判斷
     if(l) langEl.value=l;
   }
 };
-window.isDetectingLang = false; // 防撞車標記
+// 1. 獨立的「🌐 偵測語言」按鈕功能
+window.triggerAILang = async () => {
+  const term = $("f-term")?.value.trim();
+  const langEl = $("f-lang");
+  const msg = $("f-msg");
 
-// 1. 自動偵測語言（打完字點擊背景時觸發）
-window.onTermBlur = async () => { 
-  const term=$("f-term")?.value.trim(), langEl=$("f-lang"), msg=$("f-msg");
-  if(!term) return;
+  if (!term) { if (msg) msg.textContent = "請先輸入單字！"; return; }
+  if (!state.geminiKey) { if (msg) msg.textContent = "請先到設定填入 Gemini 金鑰"; return; }
+
+  if (msg) msg.textContent = "🌐 AI 判斷語言中⋯";
   
-  if(langEl && !langEl.value.trim()){
-    const byScript = detectByScript(term);
-    if(byScript) {
-      langEl.value = byScript;
-    } else if(state.geminiKey && !window.isDetectingLang){
-      window.isDetectingLang = true; // 上鎖，防止翻譯按鈕同時發送請求
-      if(msg && !msg.textContent) msg.textContent="AI 判斷語言中⋯";
-      
-      const l = await detectLangAI(term) || (looksEnglish(term)?"英文":null);
-      
-      if(l && !langEl.value.trim()) langEl.value=l;
-      if(msg && msg.textContent==="AI 判斷語言中⋯") msg.textContent=""; 
-      window.isDetectingLang = false; // 解鎖
-    } else if(looksEnglish(term)){
-      langEl.value = "英文";
-    }
+  // 優先用字形判斷，不行才呼叫 AI，最後備案才是英文
+  const l = detectByScript(term) || await detectLangAI(term) || (looksEnglish(term)?"英文":"");
+  
+  if (l) {
+    if (langEl) langEl.value = l;
+    if (msg) msg.textContent = "✓ 已填入語言";
+  } else {
+    if (msg) msg.textContent = "語言判斷失敗，請手動輸入";
   }
 };
 
-// 2. 翻譯按鈕功能
+// 2. 獨立的「✨ AI 翻譯」按鈕功能
 window.triggerAITranslate = async () => {
   const term = $("f-term")?.value.trim();
   const langEl = $("f-lang");
   const meanEl = $("f-meaning");
   const msg = $("f-msg");
 
-  if (!term) {
-    if (msg) msg.textContent = "請先輸入單字！";
-    return;
-  }
-  if (!state.geminiKey) {
-    if (msg) msg.textContent = "提示：到「設定」填入 Gemini 金鑰，才能使用 AI 翻譯功能";
-    return;
-  }
+  if (!term) { if (msg) msg.textContent = "請先輸入單字！"; return; }
+  if (!state.geminiKey) { if (msg) msg.textContent = "請先到設定填入 Gemini 金鑰"; return; }
 
-  if (msg) msg.textContent = "✨ AI 處理中⋯";
-
-  // 如果使用者打完字「立刻」按翻譯，語言可能還來不及填，這裡順手幫忙補上
+  if (msg) msg.textContent = "✨ AI 翻譯中⋯";
+  
+  // 如果按翻譯時語言還是空的，順手幫忙補上
   if (langEl && !langEl.value.trim()) {
      const l = detectByScript(term) || await detectLangAI(term) || (looksEnglish(term)?"英文":"");
      if (l) langEl.value = l;
@@ -363,9 +357,9 @@ window.triggerAITranslate = async () => {
   
   if (t) {
     if (meanEl) meanEl.value = t;
-    if (msg) msg.textContent = "✓ 已自動填入 AI 翻譯，可自行修改";
+    if (msg) msg.textContent = "✓ 已自動填入 AI 翻譯";
   } else {
-    if (msg) msg.textContent = "AI 翻譯失敗，請手動填意思或稍後再試";
+    if (msg) msg.textContent = "AI 翻譯失敗，請手動輸入";
   }
 };
 window.addWord = () => {
