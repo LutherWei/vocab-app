@@ -446,19 +446,52 @@ window.delWord = id => {
 
 // ============ 複習（單字卡） ============
 let rev = null;
+let revUI = { manual: false, sel: [] };
+window.toggleRevSel = id => {
+  const idx = revUI.sel.indexOf(id);
+  if(idx > -1) revUI.sel.splice(idx, 1);
+  else revUI.sel.push(id);
+  render();
+};
+
 function renderReview(){
   const ws=state.words;
   if(!ws.length){ $("main").innerHTML=`<div class="empty">先到「單字庫」新增幾個單字，就能開始複習囉。</div>`; return; }
+  
+  if(!rev && revUI.manual){
+    $("main").innerHTML = `<div class="card"><b>手動挑選複習單字</b>
+      <div style="display:flex; justify-content:space-between; margin:10px 0;">
+        <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="revUI.sel=state.words.map(w=>w.id); render()">全選</button>
+        <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="revUI.sel=[]; render()">全不選</button>
+      </div>
+      <div style="max-height: 40vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; margin-bottom:12px; background:var(--paper);">
+        ${state.words.map(w=>`
+          <label style="display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom: 1px solid #e2e8f0; background:var(--card); margin:0;">
+            <input type="checkbox" ${revUI.sel.includes(w.id)?'checked':''} onchange="toggleRevSel('${w.id}')" style="width:20px;height:20px;margin:0;flex-shrink:0;">
+            <div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.term)}</div><div class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.meaning)}</div></div>
+            ${dots(w.mastery||0)}
+          </label>
+        `).join("")}
+      </div>
+      <button class="primary" onclick="startRev('manual')" ${revUI.sel.length===0?'disabled':''}>開始複習（${revUI.sel.length} 張）</button>
+      <button class="ghost" style="width:100%; margin-top:8px;" onclick="revUI.manual=false; render()">取消</button>
+    </div>`;
+    return;
+  }
+
   if(!rev){
     $("main").innerHTML = `<div class="card"><b>單字卡複習</b>
       <p class="hint">每回合最多 ${SESSION_SIZE} 張卡。<b>不熟的單字會更常出現</b>，已經熟練的會慢慢退場。看到單字先想意思，再點卡片翻面對答案。</p></div>
-      <button class="primary" onclick="startRev()">開始複習（${Math.min(SESSION_SIZE,ws.length)} 張）</button>`;
+      <div class="row">
+        <button class="primary" style="flex:2" onclick="startRev('auto')">隨機複習（${Math.min(SESSION_SIZE,ws.length)} 張）</button>
+        <button class="ghost" style="flex:1" onclick="revUI.manual=true; revUI.sel=[]; render()">手動挑選</button>
+      </div>`;
     return;
   }
   if(rev.idx>=rev.ids.length){
     $("main").innerHTML = `<div class="card center"><div style="font-size:32px">🎉</div><b>本回合完成！</b>
       <p class="hint">不熟 ${rev.results.hard} · 普通 ${rev.results.ok} · 記得 ${rev.results.easy}</p></div>
-      <button class="primary" onclick="startRev()">再來一回合</button>`;
+      <button class="primary" onclick="startRev('auto')">再來一回合</button>`;
     return;
   }
   const w = state.words.find(x=>x.id===rev.ids[rev.idx]);
@@ -478,7 +511,17 @@ function renderReview(){
       <button class="b-ok" onclick="revAns('ok')">普通 🤔</button>
       <button class="b-easy" onclick="revAns('easy')">記得 😎</button></div>`:""}`;
 }
-window.startRev = () => { rev = { ids: weightedSample(state.words,SESSION_SIZE).map(w=>w.id), idx:0, flipped:false, results:{hard:0,ok:0,easy:0} }; render(); };
+window.startRev = (mode) => { 
+  let ids = [];
+  if(mode === 'manual'){
+    ids = shuffle(revUI.sel);
+    revUI.manual = false;
+  } else {
+    ids = weightedSample(state.words,SESSION_SIZE).map(w=>w.id);
+  }
+  rev = { ids, idx:0, flipped:false, results:{hard:0,ok:0,easy:0} }; 
+  render(); 
+};
 window.revAns = kind => {
   const w = state.words.find(x=>x.id===rev.ids[rev.idx]);
   if(w) applyReview(w.id, kind==="hard"?-1:kind==="ok"?0:1);
@@ -725,9 +768,33 @@ function renderQuizResult(){
 
 // ============ 造句練習 ============
 let sen = { id:null, ai:null, loading:false, error:false };
+let senUI = { manual: false, sel: null };
+window.toggleSenSel = id => {
+  senUI.sel = id;
+  render();
+};
+
 function renderSentence(){
   if(!state.words.length){ $("main").innerHTML=`<div class="empty">先到「單字庫」新增單字，就能開始造句練習。</div>`; return; }
-  if(!sen.id || !state.words.find(w=>w.id===sen.id)) pickSenWord(false);
+  
+  if (senUI.manual) {
+    $("main").innerHTML = `<div class="card"><b>手動挑選造句單字</b>
+      <div style="max-height: 40vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; margin-bottom:12px; background:var(--paper);">
+        ${state.words.map(w=>`
+          <label style="display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom: 1px solid #e2e8f0; background:var(--card); margin:0;">
+            <input type="radio" name="sen_sel" ${senUI.sel===w.id?'checked':''} onchange="toggleSenSel('${w.id}')" style="width:20px;height:20px;margin:0;flex-shrink:0;">
+            <div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.term)}</div><div class="small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(w.meaning)}</div></div>
+            ${dots(w.mastery||0)}
+          </label>
+        `).join("")}
+      </div>
+      <button class="primary" onclick="pickSenWord(true, 'manual')" ${!senUI.sel?'disabled':''}>開始造句</button>
+      <button class="ghost" style="width:100%; margin-top:8px;" onclick="senUI.manual=false; render()">取消</button>
+    </div>`;
+    return;
+  }
+
+  if(!sen.id || !state.words.find(w=>w.id===sen.id)) pickSenWord(false, 'auto');
   const w = state.words.find(x=>x.id===sen.id);
   $("main").innerHTML = `
     <div class="bigcard" style="text-align:left;padding:20px">
@@ -737,14 +804,24 @@ function renderSentence(){
       <div style="margin-top:8px;display:flex;gap:8px;align-items:center">${chip(w.lang)}${dots(w.mastery||0)}</div>
     </div>
     <textarea id="s-text" placeholder="用「${esc(w.term)}」寫一個句子⋯" style="margin-top:12px"></textarea>
-    <div class="row"><button class="primary" onclick="saveSen()">儲存句子</button><button class="ghost" onclick="pickSenWord(true)">換一個字</button></div>
+    <div class="row">
+      <button class="primary" style="flex:2" onclick="saveSen()">儲存句子</button>
+      <button class="ghost" style="flex:1; padding:0 8px" onclick="pickSenWord(true, 'auto')">隨機換字</button>
+      <button class="ghost" style="flex:1; padding:0 8px" onclick="senUI.manual=true; senUI.sel=sen.id; render()">手動挑字</button>
+    </div>
     <button class="accent" style="margin-top:12px" onclick="aiSen()" ${sen.loading?"disabled":""}>${sen.loading?"AI 造句中⋯":"✨ AI 幫我造一句"}</button>
     ${sen.error?`<div class="msg err center">${state.geminiKey?"AI 造句沒有成功，請再按一次試試。"+(aiErr?`<br>原因：${esc(aiErr)}`:""):"要用 AI 造句，請先到「設定」填入 Gemini API 金鑰。"}</div>`:""}
     ${sen.ai?`<div class="aibox"><div class="tag">AI 例句</div><div style="font-size:17px;line-height:1.7">${esc(sen.ai.sentence)}</div>${sen.ai.translation?`<div class="hint">${esc(sen.ai.translation)}</div>`:""}<div class="row" style="margin-top:10px"><button class="primary" style="padding:9px" onclick="saveAiSen()">存進單字本</button><button class="ghost" style="padding:9px" onclick="aiSen()">再造一句</button></div></div>`:""}
     ${(w.sentences||[]).length?`<div class="small" style="margin:16px 0 6px">這個字已收藏的句子</div>`+w.sentences.map(s=>`<div class="sent">${esc(s)}</div>`).join(""):""}`;
 }
-window.pickSenWord = (rerender) => {
-  const [w]=weightedSample(state.words,1);
+window.pickSenWord = (rerender, mode) => {
+  let w;
+  if (mode === 'manual' && senUI.sel) {
+    w = state.words.find(x=>x.id===senUI.sel);
+    senUI.manual = false;
+  } else {
+    [w] = weightedSample(state.words,1);
+  }
   sen={ id:w?w.id:null, ai:null, loading:false, error:false };
   if(rerender) render();
 };
