@@ -69,6 +69,11 @@
     font-size:12px; padding:3px 10px; border-radius:99px; background:#eef2ff;
     color:#4338ca; border:1px solid #e0e7ff; white-space:nowrap;
   }
+  .chip-file{
+    display:inline-block; max-width:100%; font-size:11px; padding:2px 9px; border-radius:99px;
+    background:#f1f5f9; color:#475569; border:1px solid #e2e8f0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom;
+  }
   .filter{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;}
   .filter button{
     padding:7px 16px; border-radius:99px; border:1px solid #cbd5e1;
@@ -250,6 +255,28 @@ function render(){
 const dots = lv => `<span class="dots">${[1,2,3,4,5].map(i=>`<i class="${i<=lv?"f":""}"></i>`).join("")}</span>`;
 const chip = l => l?`<span class="chip">${esc(l)}</span>`:"";
 
+// ============ 檔案（來源）挑選 ============
+const fileList = ws => [...new Set(ws.map(w=>w.source).filter(Boolean))];
+// pool：可挑選的單字範圍；sel：目前已選 id 陣列；handler：點擊時呼叫的全域函式名
+function fileSelector(pool, sel, handler){
+  const files = fileList(pool);
+  if(!files.length) return "";
+  return `<div class="small" style="margin:2px 0 6px">依檔案挑選（點檔名選取整份）</div>
+    <div class="filter" style="margin-bottom:12px">${files.map((f,i)=>{
+      const ids = pool.filter(w=>w.source===f).map(w=>w.id);
+      const allSel = ids.length>0 && ids.every(id=>sel.includes(id));
+      return `<button type="button" class="${allSel?"on":""}" onclick="${handler}(${i})">📄 ${esc(f)}（${ids.length}）</button>`;
+    }).join("")}</div>`;
+}
+// 切換整份檔案的選取狀態：全選中則取消，否則補齊
+function toggleFileSel(pool, sel, i){
+  const f = fileList(pool)[i]; if(!f) return sel;
+  const ids = pool.filter(w=>w.source===f).map(w=>w.id);
+  const allSel = ids.every(id=>sel.includes(id));
+  return allSel ? sel.filter(id=>!ids.includes(id))
+                : [...sel, ...ids.filter(id=>!sel.includes(id))];
+}
+
 // ============ 單字庫 ============
 let listUI = { showForm:false, showUploadForm:false, query:"", lang:"全部", expanded:null };
 
@@ -337,7 +364,7 @@ function wordCard(w){
   }
   return `<div class="word">
     <div class="word-head" onclick="listUI.expanded=${open?"null":`'${w.id}'`};renderListOnly()">
-      <div class="l"><div class="t"><span class="term-hl">${esc(w.term)}</span></div><div class="m">${esc(w.meaning)}</div></div>
+      <div class="l"><div class="t"><span class="term-hl">${esc(w.term)}</span></div><div class="m">${esc(w.meaning)}</div>${w.source?`<div style="margin-top:4px"><span class="chip-file">📄 ${esc(w.source)}</span></div>`:""}</div>
       <div class="r">${dots(w.mastery||0)}<div style="display:flex;gap:5px;align-items:center">${chip(w.lang)}<span class="lv">${MASTERY_LABELS[w.mastery||0]}</span></div></div>
     </div>${body}</div>`;
 }
@@ -425,7 +452,7 @@ window.extractWordsAI = async () => {
           else {
              state.words.unshift({
                 id: uid(), term: term, meaning: w.meaning.trim(), lang: w.lang || "未分類",
-                note: "AI 圖片/PDF 匯入", mastery: 0, reviews: 0, sentences: [],
+                note: "AI 圖片/PDF 匯入", source: file.name, mastery: 0, reviews: 0, sentences: [],
                 createdAt: Date.now(), lastReviewed: null
              });
              added++;
@@ -457,6 +484,7 @@ window.toggleRevSel = id => {
     btn.disabled = revUI.sel.length === 0;
   }
 };
+window.selectRevFile = i => { revUI.sel = toggleFileSel(state.words, revUI.sel, i); render(); };
 
 function renderReview(){
   const ws=state.words;
@@ -468,6 +496,7 @@ function renderReview(){
         <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="revUI.sel=state.words.map(w=>w.id); render()">全選</button>
         <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="revUI.sel=[]; render()">全不選</button>
       </div>
+      ${fileSelector(state.words, revUI.sel, 'selectRevFile')}
       <div style="max-height: 40vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; margin-bottom:12px; background:var(--paper);">
         ${state.words.map(w=>`
           <label style="display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom: 1px solid #e2e8f0; background:var(--card); margin:0;">
@@ -559,6 +588,10 @@ window.toggleQuizSel = id => {
     btn.disabled = quizUI.sel.length < needs;
   }
 };
+window.selectQuizFile = i => {
+  const pool = langGroups()[quizCfg.lang] || [];
+  quizUI.sel = toggleFileSel(pool, quizUI.sel, i); render();
+};
 
 const langOf = w => w.lang || "未分類";
 function langGroups(){
@@ -590,6 +623,7 @@ function renderQuizSetup(){
            <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="quizUI.sel=langGroups()['${esc(quizCfg.lang)}'].map(w=>w.id); render()">全選</button>
            <button class="ghost" style="padding:4px 8px; font-size:13px;" onclick="quizUI.sel=[]; render()">全不選</button>
          </div>
+         ${fileSelector(pool, quizUI.sel, 'selectQuizFile')}
          <div style="max-height: 40vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; margin-bottom:12px; background:var(--paper);">
            ${pool.map(w=>`
              <label style="display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom: 1px solid #e2e8f0; background:var(--card); margin:0;">
