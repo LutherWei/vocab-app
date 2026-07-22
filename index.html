@@ -74,6 +74,12 @@
     background:#f1f5f9; color:#475569; border:1px solid #e2e8f0;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom;
   }
+  .btn-voice{
+    background:none; border:none; padding:0 8px; font-size:16px; cursor:pointer;
+    vertical-align:middle; line-height:1; opacity:0.5; transition:opacity 0.2s, transform 0.1s;
+  }
+  .btn-voice:hover{opacity:1;}
+  .btn-voice:active{transform:scale(0.85);}
   .filter{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;}
   .filter button{
     padding:7px 16px; border-radius:99px; border:1px solid #cbd5e1;
@@ -145,6 +151,30 @@ try {
 function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){ alert("儲存失敗：手機儲存空間可能已滿"); } }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 const esc = s => String(s??"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// ============ 語音朗讀 (TTS) ============
+window.speak = (text, lang) => {
+  if(!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  const langMap = {
+    "英文": "en-US", "日文": "ja-JP", "韓文": "ko-KR", "俄文": "ru-RU",
+    "泰文": "th-TH", "阿拉伯文": "ar-SA", "德文": "de-DE", "法文": "fr-FR",
+    "西班牙文": "es-ES", "義大利文": "it-IT", "越南文": "vi-VN"
+  };
+  const bcp47 = langMap[lang] || "";
+  if(bcp47) {
+    u.lang = bcp47;
+    const voices = window.speechSynthesis.getVoices();
+    const voice = voices.find(v => v.lang.startsWith(bcp47) || v.lang.includes(bcp47.replace("-","_")));
+    if(voice) u.voice = voice;
+  }
+  window.speechSynthesis.speak(u);
+};
+window.speakWord = (id) => {
+  const w = state.words.find(x=>x.id===id);
+  if(w) speak(w.term, w.lang);
+};
 
 // ============ 熟練度加權抽樣 ============
 const daysSince = ts => ts ? Math.max(0,(Date.now()-ts)/864e5) : 30;
@@ -364,7 +394,7 @@ function wordCard(w){
   }
   return `<div class="word">
     <div class="word-head" onclick="listUI.expanded=${open?"null":`'${w.id}'`};renderListOnly()">
-      <div class="l"><div class="t"><span class="term-hl">${esc(w.term)}</span></div><div class="m">${esc(w.meaning)}</div>${w.source?`<div style="margin-top:4px"><span class="chip-file">📄 ${esc(w.source)}</span></div>`:""}</div>
+      <div class="l"><div class="t"><span class="term-hl">${esc(w.term)}</span><button class="btn-voice" onclick="event.stopPropagation();speakWord('${w.id}')">🔊</button></div><div class="m">${esc(w.meaning)}</div>${w.source?`<div style="margin-top:4px"><span class="chip-file">📄 ${esc(w.source)}</span></div>`:""}</div>
       <div class="r">${dots(w.mastery||0)}<div style="display:flex;gap:5px;align-items:center">${chip(w.lang)}<span class="lv">${MASTERY_LABELS[w.mastery||0]}</span></div></div>
     </div>${body}</div>`;
 }
@@ -718,7 +748,13 @@ function renderQuizPlay(){
   if(isMC){
     if(!quiz.opts){
       const pool=langGroups()[quiz.cfg.lang]||[];
-      quiz.opts=shuffle([w,...shuffle(pool.filter(x=>x.id!==w.id)).slice(0,3)]).map(x=>x.id);
+      const otherQs=quiz.qs.filter(id=>id!==w.id);
+      let distractorIds=shuffle(otherQs).slice(0,3);
+      if(distractorIds.length<3){
+        const extraPool=shuffle(pool.filter(x=>x.id!==w.id&&!distractorIds.includes(x.id)));
+        distractorIds=distractorIds.concat(extraPool.slice(0,3-distractorIds.length).map(x=>x.id));
+      }
+      quiz.opts=shuffle([w.id,...distractorIds]);
     }
     body = quiz.opts.map((id,i)=>{
       const o=state.words.find(x=>x.id===id); if(!o) return "";
